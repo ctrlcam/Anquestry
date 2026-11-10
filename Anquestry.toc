@@ -1,0 +1,18 @@
+## Interface: 16001
+## Title: Anquestry
+## IconTexture: Interface\AddOns\Anquestry\icons\anquestry_128.png
+## Category: Quests
+## Notes: A compact quest-chain flyout for the Forever quest log.
+## Author: Anquestry contributors
+## Version: 0.1.0
+## Dependencies: QuestieDB
+## OptionalDeps: Questie
+## X-QuestieDB-Contract: 4
+## SavedVariables: AnquestryChainCache, AnquestrySettings
+
+Core.lua
+QuestieDB.lua
+ChainResolver.lua
+Progress.lua
+UI.lua
+Config.lua
