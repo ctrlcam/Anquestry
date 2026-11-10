@@ -922,7 +922,7 @@ function Anquestry.ui:GetRow(index)
         if percentile then
             if not hasObjective then GameTooltip:SetOwner(button, "ANCHOR_RIGHT", 12, -16) end
             local fraction = percentile / 100
-            GameTooltip:AddLine(("XP Rank: #%d (%.1f%%)"):format(button.info.xpPosition, percentile),
+            GameTooltip:AddLine(("XP Rank: %d/%d (%.1f%%)"):format(button.info.xpPosition, button.info.xpBracketCount, percentile),
                 math.min(1, 2 - 2 * fraction), math.min(1, 2 * fraction), 0.2)
         end
         if hasObjective or percentile then GameTooltip:Show() end

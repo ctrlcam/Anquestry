@@ -36,7 +36,8 @@ local function xpGrade(progress, data, record)
     local level, xp = record[1], record[2]
     local grades = progress.grades[level] or {}
     progress.grades[level] = grades
-    if grades[xp] ~= nil then return grades[xp].grade, grades[xp].percentile, grades[xp].rank, grades[xp].position end
+    local result = grades[xp]
+    if result then return result.grade, result.percentile, result.rank, result.position, result.count end
     local below, tied, count = 0, 0, 0
     local window = Anquestry:GetXPWindow()
     for peer = level - window, level + window do
@@ -46,7 +47,7 @@ local function xpGrade(progress, data, record)
             if reward == xp then tied = tied + frequency end
         end
     end
-    local result = {}
+    result = { count = count }
     if count > 1 then
         result.rank = (below + tied / 2) / count
         result.grade = rankGrade(result.rank)
@@ -54,7 +55,7 @@ local function xpGrade(progress, data, record)
         result.position = count - below - tied + 1
     end
     grades[xp] = result
-    return result.grade, result.percentile, result.rank, result.position
+    return result.grade, result.percentile, result.rank, result.position, result.count
 end
 
 -- Read known XP buffs when Forever allows aura access.
@@ -103,8 +104,9 @@ function Anquestry.progress:Summary(rows)
         row.done = self:IsComplete(row.id)
         local record = xp and xp.db and xp.db[row.id]
         row.xp = adjustedXP(record, playerLevel, playerCap, multiplier)
-        local grade, percentile, rank, position = xpGrade(self, xp and xp.db, record)
+        local grade, percentile, rank, position, count = xpGrade(self, xp and xp.db, record)
         row.xpGrade, row.xpPercentile, row.xpPosition = grade, percentile, position
+        row.xpBracketCount = count
         if row.done then
             complete = complete + 1
         elseif row.xp then
