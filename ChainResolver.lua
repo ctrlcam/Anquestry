@@ -1,3 +1,5 @@
+-- Builds and saves the quest-chain index and resolves the rows for a selected quest.
+
 local _, Anquestry = ...
 Anquestry.resolver = { maxNodes = 80 }
 

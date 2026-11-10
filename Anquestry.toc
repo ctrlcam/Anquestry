@@ -10,6 +10,7 @@
 ## X-QuestieDB-Contract: 4
 ## SavedVariables: AnquestryChainCache, AnquestrySettings
 
+# Add-on modules in load order.
 Core.lua
 QuestieDB.lua
 ChainResolver.lua

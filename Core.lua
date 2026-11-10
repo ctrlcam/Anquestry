@@ -1,11 +1,11 @@
+-- Handles startup, WoW events, slash commands, and quest selection.
+
 local addonName, Anquestry = ...
 Anquestry.name = addonName
-Anquestry.version = "0.1.0"
 
 local frame = CreateFrame("Frame")
-Anquestry.eventFrame = frame
 
--- Write a Anquestry message to the chat window.
+-- Write an Anquestry message to the chat window.
 function Anquestry:Print(message)
     DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffAnquestry:|r " .. message)
 end

@@ -1,3 +1,5 @@
+-- Renders the quest flyout, relationship lines, and Quest Info, and connects them to WoW's quest UI.
+
 local addonName, Anquestry = ...
 Anquestry.ui = { rows = {}, collapsed = false }
 
@@ -489,7 +491,6 @@ end
 -- Create the flyout and hook it into Blizzard’s quest windows.
 function Anquestry.ui:Initialize()
     if self.frame then return end
-    if type(AnquestrySettings) ~= "table" then AnquestrySettings = {} end
     self.infoCollapsed = AnquestrySettings.infoCollapsed == true
     local f = CreateFrame("Frame", "AnquestryFlyout", UIParent, BackdropTemplateMixin and "BackdropTemplate")
     f:SetSize(PANEL_WIDTH, 70)

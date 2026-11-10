@@ -1,3 +1,5 @@
+-- Registers Anquestry's settings page and manages its controls and cache rebuild status.
+
 local _, Anquestry = ...
 local MAX_XP_WINDOW = 10
 
@@ -91,7 +93,7 @@ function Anquestry:RegisterConfig()
         local version = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         version:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
         local getMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
-        version:SetText("Version: " .. (getMetadata and getMetadata(self.name, "Version") or self.version))
+        version:SetText("Version: " .. (getMetadata and getMetadata(self.name, "Version") or "Unknown"))
 
         local tan = CreateColor(0.75, 0.55, 0.34, 0.8)
         local faded = CreateColor(0.75, 0.55, 0.34, 0.08)

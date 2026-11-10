@@ -1,3 +1,5 @@
+-- Wraps QuestieDB reads for quest relationships, profession requirements, and map locations.
+
 local _, Anquestry = ...
 Anquestry.db = {}
 

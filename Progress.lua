@@ -1,3 +1,5 @@
+-- Tracks completion and calculates displayed XP, rankings, and remaining totals.
+
 local _, Anquestry = ...
 Anquestry.progress = {}
 
