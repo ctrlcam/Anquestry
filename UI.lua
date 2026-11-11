@@ -219,20 +219,19 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
             nodePositions[group.first] = nodePositions[group.straight] or nodePositions[group.first]
         end
     end
-    local outgoingCount, hasIncoming = {}, {}
+    local outgoingCount = {}
     for _, group in ipairs(groups) do
         for target in pairs(group.targets) do
             outgoingCount[group.first] = (outgoingCount[group.first] or 0) + 1
-            hasIncoming[target] = true
         end
         for source in pairs(group.taps or {}) do
             outgoingCount[source] = (outgoingCount[source] or 0) + 1
         end
     end
-    -- Align a standalone breadcrumb with its destination when it has no other links.
+    -- Align breadcrumbs with their destination even when another quest leads into them.
     for _, group in ipairs(groups) do
         local target = group.straight
-        if target and group.targets[target] and not hasIncoming[group.first] and outgoingCount[group.first] == 1 then
+        if target and group.targets[target] and outgoingCount[group.first] == 1 then
             nodePositions[group.first] = nodePositions[target] or nodeX
         end
     end
@@ -308,12 +307,9 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
         if target then
             local endY = offsets[target] + 11
             local x = nodePositions[group.first] or nodeX
-            local targetX = nodePositions[target] or nodeX
             if group.targets[target] then
                 for dashY = y + 3, endY - 3, 5 do
-                    local fraction = (dashY - y) / (endY - y)
-                    local dashX = x + (targetX - x) * fraction
-                    segment(dashX, dashY, 1, math.min(3, endY - 2 - dashY))
+                    segment(x, dashY, 1, math.min(3, endY - 2 - dashY))
                 end
             else
                 segment(x, y, 1, endY - y)
