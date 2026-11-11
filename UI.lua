@@ -694,7 +694,7 @@ local function createIconTag(row, texture)
     return tag
 end
 
--- Open the endpoint's map and place a native pin where supported.
+-- Open the endpoint's map and replace the current user waypoint.
 local function showEndpointOnMap(point)
     if InCombatLockdown() then
         Anquestry:Print("Open quest locations after combat.")
@@ -711,10 +711,10 @@ local function showEndpointOnMap(point)
     if C_Map and C_Map.SetUserWaypoint and C_Map.CanSetUserWaypointOnMap
         and UiMapPoint and C_Map.CanSetUserWaypointOnMap(point.map) then
         C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(point.map, point.x, point.y))
-    else
-        Anquestry:Print("This map doesn’t support a pin.")
+        return true
     end
-    return true
+    Anquestry:Print("This map doesn’t support a pin.")
+    return false
 end
 
 -- Update the docked details for one quest or location variant.
@@ -1014,7 +1014,7 @@ function Anquestry.ui:Refresh(selectedID, reason)
         if not Anquestry.resolver.building and type(AnquestryChainCache) == "table" then
             self.frame.build:SetText("Rebuild quest chain cache")
         end
-        self.frame.footer:SetText("Build the local cache to view quest chains.")
+        self.frame.footer:SetText("Build cache to view quest chains.")
         self:FitHeight(35)
         return
     end
