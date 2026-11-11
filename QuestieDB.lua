@@ -69,6 +69,56 @@ function Anquestry.db:Get(id, key)
     return self.quest.Get(id, key)
 end
 
+local OBJECTIVE_TYPES = {
+    [1] = { label = "Slay", texture = "Interface\\Icons\\INV_Sword_04" },
+    [2] = { label = "Collect", texture = "Interface\\Icons\\INV_Misc_Bag_10" },
+    [3] = { label = "Event", texture = "Interface\\Icons\\INV_Misc_Map_01" },
+    [4] = { label = "Interact", texture = "Interface\\Icons\\Trade_Engineering" },
+    [5] = { label = "Talk", texture = "Interface\\GossipFrame\\GossipGossipIcon" },
+    [17] = { label = "Interact", texture = "Interface\\Icons\\Trade_Engineering" },
+    [19] = { label = "Mount", texture = "Interface\\Icons\\Ability_Mount_RidingHorse" },
+}
+
+-- Read Questie's explicit objective icons, with its usual defaults for each group.
+function Anquestry.db:ObjectiveTypes(id)
+    self.objectiveTypes = self.objectiveTypes or {}
+    if self.objectiveTypes[id] then return self.objectiveTypes[id] end
+    local types, seen = {}, {}
+    local function add(icon)
+        local kind = OBJECTIVE_TYPES[icon]
+        if kind and not seen[kind.label] then
+            seen[kind.label] = true
+            types[#types + 1] = { label = kind.label, texture = kind.texture, icon = icon }
+        end
+    end
+    local objectives = self:Get(id, "objectives") or {}
+    -- Prefer collection as the row summary when killing is also involved.
+    for _, group in ipairs({ 3, 1, 2, 5, 6 }) do
+        for _, objective in ipairs(objectives[group] or {}) do
+            local icon = objective[group == 5 and 4 or 3]
+            if group == 6 then icon = 3 end
+            if not icon or icon == 0 then
+                icon = group == 1 and 1 or group == 2 and 4 or group == 3 and 2 or 1
+            end
+            add(icon)
+        end
+    end
+    for _, objective in ipairs(self:Get(id, "extraObjectives") or {}) do add(objective[2]) end
+    if self:Get(id, "triggerEnd") then add(3) end
+    -- A quest with no objective groups or trigger is a simple NPC turn-in.
+    if #types == 0 and not next(objectives) and not self:Get(id, "triggerEnd") then
+        local finishers = self:Get(id, "finishedBy")
+        if finishers and finishers[1] and #finishers[1] > 0 then add(5) end
+    end
+    self.objectiveTypes[id] = types
+    return types
+end
+
+-- Use Questie's configured artwork when available, otherwise use a client icon.
+function Anquestry.db:ObjectiveTexture(kind)
+    return Questie and Questie.usedIcons and Questie.usedIcons[kind.icon] or kind.texture
+end
+
 -- Read the quest's NPC, object, and item endpoints.
 function Anquestry.db:QuestEndpoints(id)
     local endpoints = {}
@@ -92,9 +142,8 @@ function Anquestry.db:QuestEndpoints(id)
     return endpoints
 end
 
--- Pick a valid spawn, preferring the player's current map when possible.
-function Anquestry.db:FindMapPoint(spawns)
-    if not spawns then return end
+-- Load the shared area-to-map lookup once for endpoint pins and distances.
+function Anquestry.db:AreaMaps()
     if not self.areaToMap then
         local support = self.library.Support
         local zone = support and support.Get("ZoneDB")
@@ -113,10 +162,17 @@ function Anquestry.db:FindMapPoint(spawns)
             end
         end
     end
+    return self.areaToMap
+end
+
+-- Pick a valid spawn, preferring the player's current map when possible.
+function Anquestry.db:FindMapPoint(spawns)
+    if not spawns then return end
+    local areaToMap = self:AreaMaps()
     local current = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
     local best, bestArea
     for area, points in pairs(spawns) do
-        local map = self.areaToMap[area]
+        local map = areaToMap[area]
         if map and map > 0 then
             for _, point in ipairs(points) do
                 local x, y = point[1], point[2]
@@ -131,6 +187,50 @@ function Anquestry.db:FindMapPoint(spawns)
         end
     end
     return best
+end
+
+-- Cache the shortest known start-to-turn-in distance for each quest variant.
+function Anquestry.db:TravelDistance(id)
+    if not C_Map or not C_Map.GetWorldPosFromMapPos then return end
+    self.travelDistances = self.travelDistances or {}
+    if self.travelDistances[id] ~= nil then return self.travelDistances[id] or nil end
+    local starts, finishes = {}, {}
+    local areaToMap = self:AreaMaps()
+    for _, endpoint in ipairs(self:QuestEndpoints(id)) do
+        local points = endpoint.starts and starts or finishes
+        for area, spawns in pairs(endpoint.spawns or {}) do
+            local map = areaToMap[area]
+            if map then
+                for _, spawn in ipairs(spawns) do
+                    local x, y = spawn[1], spawn[2]
+                    if x and y and x >= 0 and x <= 100 and y >= 0 and y <= 100 then
+                        local continent, position = C_Map.GetWorldPosFromMapPos(map, CreateVector2D(x / 100, y / 100))
+                        if continent and position then
+                            local worldX, worldY = position:GetXY()
+                            points[#points + 1] = { continent = continent, x = worldX, y = worldY }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local nearest
+    for _, start in ipairs(starts) do
+        for _, finish in ipairs(finishes) do
+            if start.continent == finish.continent then
+                local dx, dy = finish.x - start.x, finish.y - start.y
+                nearest = math.min(nearest or math.huge, dx * dx + dy * dy)
+            end
+        end
+    end
+    local result
+    if nearest then
+        result = { yards = math.sqrt(nearest) }
+    elseif #starts > 0 and #finishes > 0 then
+        result = { differentContinents = true }
+    end
+    self.travelDistances[id] = result or false
+    return result
 end
 
 -- Collect prerequisite and follow-up IDs separately.

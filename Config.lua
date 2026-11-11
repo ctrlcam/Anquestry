@@ -2,11 +2,18 @@
 
 local _, Anquestry = ...
 local MAX_XP_WINDOW = 10
+local MAX_TRAVEL_DISTANCE = 10000
 
 -- Read the saved level range, defaulting to two levels on either side.
 function Anquestry:GetXPWindow()
     local value = tonumber(AnquestrySettings.xpWindow) or 2
     return math.max(0, math.min(MAX_XP_WINDOW, math.floor(value)))
+end
+
+-- Read the travel marker threshold in yards, defaulting to 1,000.
+function Anquestry:GetTravelThreshold()
+    local value = tonumber(AnquestrySettings.travelThreshold) or 1000
+    return math.max(0, math.min(MAX_TRAVEL_DISTANCE, math.floor(value / 100 + 0.5) * 100))
 end
 
 -- Update both cache controls from the same build state.
@@ -137,11 +144,32 @@ function Anquestry:RegisterConfig()
             self:Refresh("SETTINGS")
         end)
 
+        local travelLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        travelLabel:SetPoint("TOPLEFT", 23, -179)
+        travelLabel:SetText(("Long-distance threshold: %d yards"):format(self:GetTravelThreshold()))
+        local travelSlider = CreateFrame("Slider", "AnquestryTravelThresholdSlider", panel, "OptionsSliderTemplate")
+        travelSlider:SetPoint("TOPLEFT", 23, -204)
+        travelSlider:SetSize(320, 16)
+        travelSlider:SetMinMaxValues(0, MAX_TRAVEL_DISTANCE)
+        travelSlider:SetValueStep(100)
+        travelSlider:SetObeyStepOnDrag(true)
+        travelSlider:SetValue(self:GetTravelThreshold())
+        local travelHelp = "Distance from quest start to turn-in required for the long-distance indicator, in straight-line yards. Set to 0 to disable."
+        addTooltip(travelSlider, "Long-distance threshold", travelHelp)
+        addLabelTooltip(panel, travelLabel, "Long-distance threshold", travelHelp)
+        travelSlider:SetScript("OnValueChanged", function(_, newValue)
+            newValue = math.floor(newValue / 100 + 0.5) * 100
+            if newValue == self:GetTravelThreshold() then return end
+            AnquestrySettings.travelThreshold = newValue
+            travelLabel:SetText(("Long-distance threshold: %d yards"):format(newValue))
+            self:Refresh("SETTINGS")
+        end)
+
         panel.cacheStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        panel.cacheStatus:SetPoint("TOPLEFT", 23, -179)
+        panel.cacheStatus:SetPoint("TOPLEFT", 23, -247)
         panel.rebuild = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         panel.rebuild:SetSize(146, 24)
-        panel.rebuild:SetPoint("TOPLEFT", 23, -205)
+        panel.rebuild:SetPoint("TOPLEFT", 23, -273)
         panel.rebuild:SetText("Rebuild Cache")
         panel.rebuild:SetScript("OnClick", function() self:RebuildCache() end)
         local cacheHelp = "Anquestry saves an index of QuestieDB quest links so it can show chains quickly as you select quests. Rebuild Cache regenerates that index from your installed QuestieDB data."

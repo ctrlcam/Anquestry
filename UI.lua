@@ -3,7 +3,7 @@
 local addonName, Anquestry = ...
 Anquestry.ui = { rows = {}, collapsed = false }
 
-local PANEL_WIDTH, STANDALONE_MAX_HEIGHT = 250, 390
+local PANEL_WIDTH, STANDALONE_MAX_HEIGHT = 275, 390
 local HEADER_HEIGHT = 34
 local COMPLETED_COLOR = 0.53
 local XP_GRADE_COLORS = {
@@ -752,6 +752,11 @@ function Anquestry.ui:ShowWowheadURL(questID, variants)
         popup.questIDText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         popup.questIDText:SetPoint("TOPLEFT", 12, -39)
         popup.endpoints = {}
+        popup.objectiveText = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        popup.objectiveText:SetPoint("LEFT", 12, 0)
+        popup.objectiveText:SetPoint("RIGHT", -12, 0)
+        popup.objectiveText:SetJustifyH("LEFT")
+        popup.objectiveIcons = {}
         popup.locationPicker = CreateFrame("DropdownButton", nil, popup, "WowStyle1DropdownTemplate")
         popup.locationPicker:SetPoint("TOPLEFT", 10, -55)
         popup.locationPicker:SetPoint("RIGHT", popup, "RIGHT", -10, 0)
@@ -798,6 +803,8 @@ function Anquestry.ui:ShowWowheadURL(questID, variants)
     popup.questIDText:SetShown(not self.infoCollapsed)
     popup.editBox:SetShown(not self.infoCollapsed)
     if self.infoCollapsed then
+        popup.objectiveText:Hide()
+        for _, icon in ipairs(popup.objectiveIcons) do icon:Hide() end
         popup.locationPicker:Hide()
         for _, button in ipairs(popup.endpoints) do button:Hide() end
         popup:SetHeight(HEADER_HEIGHT)
@@ -870,7 +877,32 @@ function Anquestry.ui:ShowWowheadURL(questID, variants)
         button:Show()
     end
     for index = #endpoints + 1, #popup.endpoints do popup.endpoints[index]:Hide() end
-    popup:SetHeight(95 + pickerHeight + #endpoints * 20)
+    local objectiveY = 58 + pickerHeight + #endpoints * 20
+    local kinds = Anquestry.db:ObjectiveTypes(questID)
+    for index, kind in ipairs(kinds) do
+        local tag = popup.objectiveIcons[index]
+        if not tag then
+            tag = createIconTag(popup, nil)
+            popup.objectiveIcons[index] = tag
+        end
+        tag:ClearAllPoints()
+        tag:SetPoint("TOPRIGHT", -12 - (#kinds - index) * 19, -36)
+        tag.icon:SetTexture(Anquestry.db:ObjectiveTexture(kind))
+        tag.tooltip = kind.label
+        tag:Show()
+    end
+    for index = #kinds + 1, #popup.objectiveIcons do popup.objectiveIcons[index]:Hide() end
+    local objectiveLines = {}
+    for _, text in ipairs(Anquestry.db:Get(questID, "objectivesText") or {}) do
+        if type(text) == "string" and text ~= "" then objectiveLines[#objectiveLines + 1] = text end
+    end
+    popup.objectiveText:ClearAllPoints()
+    popup.objectiveText:SetPoint("TOPLEFT", 12, -objectiveY)
+    popup.objectiveText:SetPoint("RIGHT", -12, 0)
+    popup.objectiveText:SetText(table.concat(objectiveLines, "\n"))
+    popup.objectiveText:SetShown(#objectiveLines > 0)
+    local textHeight = #objectiveLines > 0 and popup.objectiveText:GetStringHeight() + 8 or 0
+    popup:SetHeight(95 + pickerHeight + #endpoints * 20 + textHeight)
     popup:Show()
     syncQuestLogArt(popup)
     if self.contentHeight then self:FitHeight(self.contentHeight) end
@@ -901,10 +933,11 @@ function Anquestry.ui:GetRow(index)
     row.strike:Hide()
     row.xp = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.xp:SetPoint("RIGHT", -3, 0)
-    row.optional = createIconTag(row, 133968)
-    row.optional.icon:SetTexCoord(0.14, 0.86, 0.14, 0.86)
-    row.locationTag = createIconTag(row, "Interface\\Icons\\INV_Misc_Map_01")
+    row.objective = createIconTag(row, nil)
+    row.locationTag = createIconTag(row, 134149)
     row.locationTag.icon:SetTexCoord(0.09, 0.91, 0.09, 0.91)
+    row.travel = createIconTag(row, 3193420)
+    row.travel.icon:SetTexCoord(0.09, 0.91, 0.09, 0.91)
     row:SetScript("OnEnter", function(button)
         local hasObjective = false
         for _, objective in ipairs(Anquestry.db:Get(button.questID, "objectivesText") or {}) do
@@ -1097,27 +1130,40 @@ function Anquestry.ui:Refresh(selectedID, reason)
             end
             row.connection.tooltipLines = lines
         end
-        info.breadcrumb = Anquestry.db:Get(info.id, "breadcrumbForQuestId")
-        local optional = info.breadcrumb and info.breadcrumb > 0
-        row.optional:SetShown(optional)
         local done = info.done
         local xpText = info.xp and (tostring(info.xp) .. " XP") or "—"
         local color = done and "878787" or info.xp and XP_GRADE_COLORS[info.xpGrade]
         row.xp:SetText(color and ("|cff" .. color .. xpText .. "|r") or xpText)
+        local kinds = Anquestry.db:ObjectiveTypes(info.id)
+        local kind = kinds[1]
+        row.objective:SetShown(kind ~= nil)
+        if kind then
+            row.objective.icon:SetTexture(Anquestry.db:ObjectiveTexture(kind))
+            row.objective.tooltip = kind.label
+        end
         local tagInset = 6 + row.xp:GetStringWidth()
+        if kind then
+            row.objective:ClearAllPoints()
+            row.objective:SetPoint("RIGHT", -tagInset, 0)
+            tagInset = tagInset + row.objective:GetWidth() + 3
+        end
+        local threshold = Anquestry:GetTravelThreshold()
+        local travel = threshold > 0 and Anquestry.db:TravelDistance(info.id)
+        local distant = travel and (travel.differentContinents or travel.yards > threshold)
+        row.travel:SetShown(not not distant)
+        if distant then
+            row.travel.tooltip = travel.differentContinents and "Different continents"
+                or ("%d yards"):format(math.floor(travel.yards + 0.5))
+            row.travel:ClearAllPoints()
+            row.travel:SetPoint("RIGHT", -tagInset, 0)
+            tagInset = tagInset + row.travel:GetWidth() + 3
+        end
         row.locationTag:SetShown(info.locations ~= nil)
         if info.locations then
             row.locationTag.tooltip = (info.alternatives and "%d alternative starters" or "%d locations"):format(info.locations)
             row.locationTag:ClearAllPoints()
             row.locationTag:SetPoint("RIGHT", -tagInset, 0)
             tagInset = tagInset + row.locationTag:GetWidth() + 3
-        end
-        if optional then
-            local target = Anquestry.db:Get(info.breadcrumb, "name")
-            row.optional.tooltip = target and ("Breadcrumb for " .. target) or "Breadcrumb"
-            row.optional:ClearAllPoints()
-            row.optional:SetPoint("RIGHT", -tagInset, 0)
-            tagInset = tagInset + row.optional:GetWidth() + 3
         end
         row.text:SetPoint("RIGHT", -tagInset - 3, 0)
         local level = info.level and info.level > 0 and ("[" .. info.level .. "] ") or ""

@@ -225,8 +225,75 @@ function Anquestry.resolver:Resolve(selectedID)
         if index and index > 0 then return 2 end
         return Anquestry.progress:IsComplete(id) and 1 or 0
     end
+    local available, before, after = {}, {}, {}
+    for _, id in ipairs(chain.ids) do available[id] = true end
+    -- Reconstruct only this cached graph so character choices never change the saved index.
+    local function link(previous, nextID)
+        if previous == nextID or not available[previous] or not available[nextID] then return end
+        before[nextID] = before[nextID] or {}
+        after[previous] = after[previous] or {}
+        before[nextID][previous] = true
+        after[previous][nextID] = true
+    end
     for _, id in ipairs(chain.ids) do
-        if id == selectedID or Anquestry.db:MatchesProfession(id, skills) then
+        local earlier, later = Anquestry.db:Relationships(id)
+        for _, previous in ipairs(earlier) do link(previous, id) end
+        for _, nextID in ipairs(later) do link(id, nextID) end
+    end
+    local starters = Anquestry.db:Get(selectedID, "startedBy") or {}
+    local scores = {}
+    -- Prefer a handoff at the selected starter, then active or completed variants.
+    local function routeScore(id)
+        if scores[id] then return scores[id] end
+        local score = priority(id) * 1000
+        local finishers = Anquestry.db:Get(id, "finishedBy") or {}
+        for kind = 1, 2 do
+            for _, finisher in ipairs(finishers[kind] or {}) do
+                for _, starter in ipairs(starters[kind] or {}) do
+                    if finisher == starter then score = score + 10000 end
+                end
+            end
+        end
+        scores[id] = score
+        return score
+    end
+    local included, queue = { [selectedID] = true }, { selectedID }
+    -- Keep all downstream branches and location variants.
+    local index = 1
+    while queue[index] do
+        for id in pairs(after[queue[index]] or {}) do
+            if not included[id] then included[id] = true; queue[#queue + 1] = id end
+        end
+        index = index + 1
+    end
+    -- Choose one equivalent prerequisite variant while preserving distinct ANY/ALL inputs.
+    index = 1
+    while queue[index] do
+        local id = queue[index]
+        local required = {}
+        for _, previous in ipairs(Anquestry.db:Get(id, "preQuestGroup") or {}) do required[previous] = true end
+        for previous in pairs(before[id] or {}) do
+            local keep = true
+            if not required[previous] and not included[previous] then
+                local score = routeScore(previous)
+                for _, other in ipairs(Anquestry.db:Get(previous, "exclusiveTo") or {}) do
+                    if before[id][other] and not required[other]
+                        and Anquestry.db:Get(other, "name") == Anquestry.db:Get(previous, "name")
+                        and Anquestry.db:Get(other, "questLevel") == Anquestry.db:Get(previous, "questLevel") then
+                        local otherScore = routeScore(other)
+                        if included[other] or otherScore > score or (otherScore == score and other < previous) then
+                            keep = false
+                            break
+                        end
+                    end
+                end
+            end
+            if keep and not included[previous] then included[previous] = true; queue[#queue + 1] = previous end
+        end
+        index = index + 1
+    end
+    for _, id in ipairs(chain.ids) do
+        if included[id] and (id == selectedID or Anquestry.db:MatchesProfession(id, skills)) then
             local title = Anquestry.db:Get(id, "name") or ("Quest " .. id)
             local row = { id = id, title = title, level = Anquestry.db:Get(id, "questLevel"), relation = chain.relations[id], depth = chain.depths[id], branch = chain.branches[id] }
             local key, alternatives
