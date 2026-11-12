@@ -11,8 +11,29 @@ local XP_GRADE_COLORS = {
     C = "c8ad83", D = "b8aa92", F = "a8a49e", ["F-"] = "989898",
 }
 
--- Pick a difficulty color based on the player’s level.
-local function questColor(level)
+local NATIVE_DIFFICULTY_COLORS = {}
+if Enum and Enum.RelativeContentDifficulty then
+    local colors = {
+        Trivial = { 0.55, 0.55, 0.55 },
+        Easy = { 0.25, 0.8, 0.25 },
+        Fair = { 1, 0.95, 0.1 },
+        Difficult = { 1, 0.5, 0.25 },
+        Impossible = { 1, 0.1, 0.1 },
+    }
+    for name, color in pairs(colors) do
+        local difficulty = Enum.RelativeContentDifficulty[name]
+        if difficulty then NATIVE_DIFFICULTY_COLORS[difficulty] = color end
+    end
+end
+
+-- Prefer the client's quest-specific difficulty, falling back to a level estimate.
+local function questColor(level, questID)
+    if questID and HaveQuestData and HaveQuestData(questID)
+        and C_PlayerInfo and C_PlayerInfo.GetContentDifficultyQuestForPlayer then
+        local difficulty = C_PlayerInfo.GetContentDifficultyQuestForPlayer(questID)
+        local color = NATIVE_DIFFICULTY_COLORS[difficulty]
+        if color then return unpack(color) end
+    end
     local player = UnitLevel("player") or level or 1
     if not level or level <= 0 then return 0.95, 0.82, 0.35 end
     local delta = level - player
@@ -342,7 +363,7 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
         end
     end
     for index, shape in pairs(nodes) do
-        nodeRed, nodeGreen, nodeBlue = questColor(chain[index].level)
+        nodeRed, nodeGreen, nodeBlue = questColor(chain[index].level, chain[index].id)
         if chain[index].done then nodeRed, nodeGreen, nodeBlue = COMPLETED_COLOR, COMPLETED_COLOR, COMPLETED_COLOR end
         local x, y = nodePositions[index] or nodeX, offsets[index] + 11
         local join = joins and joins[index]
@@ -1167,7 +1188,7 @@ function Anquestry.ui:Refresh(selectedID, reason)
         end
         row.text:SetPoint("RIGHT", -tagInset - 3, 0)
         local level = info.level and info.level > 0 and ("[" .. info.level .. "] ") or ""
-        local r, g, b = questColor(info.level)
+        local r, g, b = questColor(info.level, info.id)
         if done then r, g, b = COMPLETED_COLOR, COMPLETED_COLOR, COMPLETED_COLOR end
         row.text:SetText(level .. info.title)
         row.text:SetTextColor(r, g, b)

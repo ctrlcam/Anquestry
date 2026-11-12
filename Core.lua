@@ -129,6 +129,16 @@ local function onEvent(_, event, ...)
         Anquestry:Refresh(event)
     elseif event == "QUEST_ACCEPTED" or event == "QUEST_TURNED_IN" or event == "PLAYER_LEVEL_UP" then
         Anquestry:Refresh(event)
+    elseif event == "QUEST_DATA_LOAD_RESULT" then
+        local questID, success = ...
+        if success and Anquestry.ui.frame and Anquestry.ui.frame:IsShown() then
+            for _, row in ipairs(Anquestry.ui.rows) do
+                if row:IsShown() and row.questID == questID then
+                    Anquestry:Refresh(event)
+                    break
+                end
+            end
+        end
     elseif event == "QUEST_LOG_UPDATE" or event == "SUPER_TRACKING_CHANGED" then
         if event == "SUPER_TRACKING_CHANGED" then
             local userWaypoint = C_SuperTrack.IsSuperTrackingUserWaypoint and C_SuperTrack.IsSuperTrackingUserWaypoint()
@@ -153,6 +163,7 @@ function Anquestry:Initialize()
     end
     frame:RegisterEvent("PLAYER_LOGIN")
     frame:RegisterEvent("QUEST_LOG_UPDATE")
+    frame:RegisterEvent("QUEST_DATA_LOAD_RESULT")
     if C_SuperTrack and (C_SuperTrack.GetSuperTrackedQuestID or C_SuperTrack.GetSuperTrackedMapPin) then
         frame:RegisterEvent("SUPER_TRACKING_CHANGED")
     end

@@ -104,6 +104,16 @@ function Anquestry.progress:Summary(rows)
         row.done = self:IsComplete(row.id)
         local record = xp and xp.db and xp.db[row.id]
         row.xp = adjustedXP(record, playerLevel, playerCap, multiplier)
+        local reward
+        if QuestFrame and QuestFrame:IsShown() and GetQuestID and GetQuestID() == row.id and GetRewardXP then
+            reward = GetRewardXP()
+        elseif HaveQuestData and HaveQuestData(row.id) and GetQuestLogRewardXP then
+            reward = GetQuestLogRewardXP(row.id)
+        end
+        if type(reward) == "number" and (not issecretvalue or not issecretvalue(reward)) and reward > 0 then
+            -- Native rewards already include the client's level scaling and modifiers.
+            row.xp = reward
+        end
         local grade, percentile, rank, position, count = xpGrade(self, xp and xp.db, record)
         row.xpGrade, row.xpPercentile, row.xpPosition = grade, percentile, position
         row.xpBracketCount = count
