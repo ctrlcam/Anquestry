@@ -177,12 +177,17 @@ local function layoutLinks(chain)
     end
     local laneEnds, rails = {}, {}
     for _, group in pairs(groups) do
-        if next(group.targets) then rails[#rails + 1] = group end
+        if next(group.targets) then
+            group.last = group.first
+            for target in pairs(group.targets) do group.last = math.max(group.last, target) end
+            rails[#rails + 1] = group
+        end
     end
-    table.sort(rails, function(a, b) return a.first < b.first end)
+    table.sort(rails, function(a, b)
+        if a.first == b.first then return a.last > b.last end
+        return a.first < b.first
+    end)
     for _, group in ipairs(rails) do
-        group.last = group.first
-        for target in pairs(group.targets) do group.last = math.max(group.last, target) end
         local target, breadcrumb = next(group.targets)
         if not group.taps and target == group.first + 1 and not next(group.targets, target)
             and (breadcrumb or (outCount[group.first] == 1 and inCount[target] == 1)) then
@@ -226,12 +231,15 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
     local nodePositions = {}
     -- Find the horizontal position of a rail within the gutter.
     local function railX(group)
-        return 3 + (group.lane - 1) * (gutter - 8) / lanes
+        local x = 3 + (group.lane - 1) * (gutter - 8) / lanes
+        return math.max(x, nodePositions[group.first] or x)
     end
     for _, group in ipairs(groups) do
         if not group.straight then
             local _, breadcrumb = next(group.targets)
-            if not breadcrumb then nodePositions[group.first] = railX(group) end
+            if not breadcrumb then
+                nodePositions[group.first] = math.min(nodePositions[group.first] or nodeX, railX(group))
+            end
         end
     end
     for i = #groups, 1, -1 do
@@ -275,6 +283,38 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
                 end
             end
         end
+    end
+    -- Keep sequential nodes aligned and every join at or to the right of its rail.
+    for _ = 1, #chain do
+        local changed = false
+        for _, group in ipairs(groups) do
+            local target = group.straight
+            if target then
+                local x = math.max(nodePositions[group.first] or 0, nodePositions[target] or 0)
+                if x == 0 then x = nodeX end
+                if nodePositions[group.first] ~= x or nodePositions[target] ~= x then
+                    nodePositions[group.first], nodePositions[target] = x, x
+                    changed = true
+                end
+            else
+                local x = railX(group)
+                for destination in pairs(group.targets) do
+                    local targetX = math.max(nodePositions[destination] or nodeX, x)
+                    if nodePositions[destination] ~= targetX then
+                        nodePositions[destination] = targetX
+                        changed = true
+                    end
+                end
+                for source in pairs(group.taps or {}) do
+                    local sourceX = math.max(nodePositions[source] or nodeX, x)
+                    if nodePositions[source] ~= sourceX then
+                        nodePositions[source] = sourceX
+                        changed = true
+                    end
+                end
+            end
+        end
+        if not changed then break end
     end
     -- Point into the destination row, never back toward its source.
     local function arrow(index, downward)
@@ -344,7 +384,8 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
             for destination, breadcrumb in pairs(group.targets) do
                 if not breadcrumb then solidEnd = math.max(solidEnd, offsets[destination] + 11) end
             end
-            if not nodePositions[group.first] then horizontal(group, group.first, false) end
+            local sourceX = nodePositions[group.first] or nodeX
+            if x > sourceX then segment(sourceX, y, x - sourceX, 1) end
             if solidEnd > y then segment(x, y, 1, solidEnd - y) end
             for dashY = solidEnd, offsets[group.last] + 10, 5 do
                 local length = math.min(3, offsets[group.last] + 11 - dashY)
@@ -511,7 +552,8 @@ function Anquestry.ui:Initialize()
     self.infoCollapsed = AnquestrySettings.infoCollapsed == true
     local f = CreateFrame("Frame", "AnquestryFlyout", UIParent, BackdropTemplateMixin and "BackdropTemplate")
     f:SetSize(PANEL_WIDTH, 70)
-    f:SetFrameStrata("HIGH")
+    f:SetIgnoreParentScale(true)
+    f:SetScale(UIParent:GetEffectiveScale())
     f:Hide()
     backdrop(f)
     f:HookScript("OnSizeChanged", syncQuestLogArt)
@@ -739,12 +781,11 @@ function Anquestry.ui:ShowWowheadURL(questID, variants)
     if AnquestrySettings.showQuestInfo == false then return end
     local popup = self.urlPopup
     if not popup then
-        popup = CreateFrame("Frame", nil, UIParent, BackdropTemplateMixin and "BackdropTemplate")
+        popup = CreateFrame("Frame", nil, self.frame, BackdropTemplateMixin and "BackdropTemplate")
         popup:SetHeight(76)
         popup:SetPoint("TOPLEFT", self.frame, "BOTTOMLEFT", 0, -3)
         popup:SetPoint("TOPRIGHT", self.frame, "BOTTOMRIGHT", 0, -3)
         self.frame:HookScript("OnHide", function() popup:Hide() end)
-        popup:SetFrameStrata("DIALOG")
         popup:EnableMouse(true)
         backdrop(popup)
         local function toggleInfo()
@@ -959,6 +1000,9 @@ function Anquestry.ui:GetRow(index)
     row.locationTag.icon:SetTexCoord(0.09, 0.91, 0.09, 0.91)
     row.travel = createIconTag(row, 3193420)
     row.travel.icon:SetTexCoord(0.09, 0.91, 0.09, 0.91)
+    row.dungeon = createIconTag(row, nil)
+    row.dungeon.icon:SetAtlas("Dungeon")
+    row.dungeon.tooltip = "Dungeon"
     row:SetScript("OnEnter", function(button)
         local hasObjective = false
         for _, objective in ipairs(Anquestry.db:Get(button.questID, "objectivesText") or {}) do
@@ -981,11 +1025,25 @@ function Anquestry.ui:GetRow(index)
         if GameTooltip:IsOwned(button) then GameTooltip:Hide() end
     end)
     row:SetScript("OnClick", function(button)
-        self.inspectedQuestID = button.questID
+        local questID, variants = button.questID, button.info.variants
+        self.inspectedQuestID = questID
         for _, questRow in ipairs(self.rows) do
             questRow.highlight:SetShown(questRow == button)
         end
-        self:ShowWowheadURL(button.questID, button.info.variants)
+        self:ShowWowheadURL(questID, variants)
+        local index = C_QuestLog and C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
+        if index and index > 0 then
+            Anquestry.mapPreviewQuestID = nil
+            Anquestry.testQuestID = nil
+            self.locationQuestID = nil
+            if QuestMapFrame and QuestMapFrame:IsVisible() and QuestMapFrame_ShowQuestDetails then
+                QuestMapFrame_ShowQuestDetails(questID)
+            elseif C_QuestLog.SetSelectedQuest then
+                C_QuestLog.SetSelectedQuest(questID)
+                if QuestLog_Update then QuestLog_Update() end
+            end
+            Anquestry:Refresh("ROW_SELECTION")
+        end
     end)
     self.rows[index] = row
     return row
@@ -1024,6 +1082,11 @@ function Anquestry.ui:Refresh(selectedID, reason)
         self.anchor = nil
         return
     end
+    local owner = anchor == QuestMapFrame and WorldMapFrame or anchor
+    if self.frame:GetParent() ~= owner then self.frame:SetParent(owner) end
+    self.frame:SetScale(UIParent:GetEffectiveScale())
+    self.frame:SetFrameStrata(owner:GetFrameStrata())
+    self.frame:SetFrameLevel(owner:GetFrameLevel() + 1)
     local inset = 0
     if anchor == QuestMapFrame or anchor == WorldMapFrame then
         local border = WorldMapFrame and WorldMapFrame.BorderFrame
@@ -1163,6 +1226,13 @@ function Anquestry.ui:Refresh(selectedID, reason)
             row.objective.tooltip = kind.label
         end
         local tagInset = 6 + row.xp:GetStringWidth()
+        local dungeon = Anquestry.db:IsDungeonQuest(info.id)
+        row.dungeon:SetShown(dungeon)
+        if dungeon then
+            row.dungeon:ClearAllPoints()
+            row.dungeon:SetPoint("RIGHT", -tagInset, 0)
+            tagInset = tagInset + row.dungeon:GetWidth() + 3
+        end
         if kind then
             row.objective:ClearAllPoints()
             row.objective:SetPoint("RIGHT", -tagInset, 0)

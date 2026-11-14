@@ -119,6 +119,19 @@ function Anquestry.db:ObjectiveTexture(kind)
     return Questie and Questie.usedIcons and Questie.usedIcons[kind.icon] or kind.texture
 end
 
+-- Read the same native dungeon tags used by Questie.
+function Anquestry.db:IsDungeonQuest(id)
+    local tag
+    if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local info = C_QuestLog.GetQuestTagInfo(id)
+        tag = info and info.tagID
+    elseif GetQuestTagInfo then
+        tag = GetQuestTagInfo(id)
+    end
+    local tags = Enum and Enum.QuestTag
+    return tag == (tags and tags.Dungeon or 81) or tag == (tags and tags.Heroic or 85)
+end
+
 -- Read the quest's NPC, object, and item endpoints.
 function Anquestry.db:QuestEndpoints(id)
     local endpoints = {}
