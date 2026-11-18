@@ -15,5 +15,7 @@ Core.lua
 QuestieDB.lua
 ChainResolver.lua
 Progress.lua
+QuestieTooltips.lua
 UI.lua
+Details.lua
 Config.lua

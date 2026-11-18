@@ -10,6 +10,16 @@ function Anquestry.progress:IsComplete(questID)
     return false
 end
 
+-- Share the compact, difficulty-colored XP ranking used in reward previews and Questie.
+function Anquestry.progress:FormatRank(row)
+    if not row.xpPercentile or not row.xpPosition or not row.xpBracketCount then return end
+    local fraction = row.xpPercentile / 100
+    local color = ("|cff%02x%02x%02x"):format(
+        math.floor(math.min(1, 2 - 2 * fraction) * 255),
+        math.floor(math.min(1, 2 * fraction) * 255), 64)
+    return ("%s%d/%d (%.0f%%)|r"):format(color, row.xpPosition, row.xpBracketCount, row.xpPercentile)
+end
+
 local XP_BUFFS = { [377749] = 0.5, [46668] = 0.1, [95987] = 0.1, [24705] = 0.1 }
 
 -- Map a reward rank to the flyout's color band.

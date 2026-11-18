@@ -12,6 +12,7 @@ end
 
 -- Follow plain clicks on Questie's available-quest map pins.
 function Anquestry:HookQuestiePins()
+    self:HookQuestieTooltips()
     if self.questiePinHook or not QuestieLoader or not QuestieLoader.ImportModule then return end
     local ok, module = pcall(QuestieLoader.ImportModule, QuestieLoader, "QuestieFrame")
     local handlers = ok and module and module.private
@@ -56,6 +57,7 @@ end
 -- Pass the current selection to the flyout.
 function Anquestry:Refresh(reason)
     if not self.ui or self.ui.openingQuestLocation then return end
+    local followMap = reason == "QUESTIE_PIN" or reason == "BLIZZARD_PIN" or reason == "SUPER_TRACKING_CHANGED"
     if reason == "QUESTIE_PIN" or reason == "BLIZZARD_PIN" then
         self.ui.locationQuestID = nil
     end
@@ -65,6 +67,10 @@ function Anquestry:Refresh(reason)
         reason = "TEST_END"
     end
     local questID = self:GetSelectedQuestID()
+    if followMap and self.details and self.details.frame and self.details.frame:IsShown() then
+        local preview = self.mapPreviewQuestID or self:GetTrackedQuestID()
+        if preview and preview > 0 and preview ~= self.details.questID then self.details:Open(preview) end
+    end
     self.ui:Refresh(questID, reason)
 end
 

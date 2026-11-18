@@ -1,4 +1,4 @@
--- Wraps QuestieDB reads for quest relationships, profession requirements, and map locations.
+-- Wraps QuestieDB reads for quest relationships, requirements, and map locations.
 
 local _, Anquestry = ...
 Anquestry.db = {}
@@ -67,6 +67,56 @@ end
 function Anquestry.db:Get(id, key)
     if not self.quest or not id then return nil end
     return self.quest.Get(id, key)
+end
+
+-- Report only requirements we can prove unmet; nil does not claim availability.
+function Anquestry.db:HasUnmetRequirements(id)
+    local logIndex = C_QuestLog and C_QuestLog.GetLogIndexForQuestID(id)
+    local canCheckCompletion = (C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted) or IsQuestFlaggedCompleted
+    local function completed(target)
+        if canCheckCompletion and self:Exists(target) then return Anquestry.progress:IsComplete(target) end
+    end
+    if (logIndex and logIndex > 0) or completed(id) then return false end
+    local level = UnitLevel("player")
+    local minimum, maximum = self:Get(id, "requiredLevel"), self:Get(id, "requiredMaxLevel")
+    if level and level > 0 then
+        if minimum and minimum > 0 and level < minimum then return true end
+        if maximum and maximum > 0 and level > maximum then return true end
+    end
+    local enum = self.library and self.library.Enum
+    local band = bit and bit.band
+    if enum and band then
+        local _, class = UnitClass("player")
+        local _, _, race = UnitRace("player")
+        local classMask = enum.classKeys and enum.classKeys[class]
+        local raceMask = enum.raceMaskById and enum.raceMaskById[race]
+        local classes, races = self:Get(id, "requiredClasses"), self:Get(id, "requiredRaces")
+        if classes and classes > 0 and classMask and band(classes, classMask) == 0 then return true end
+        if races and races > 0 and raceMask and band(races, raceMask) == 0 then return true end
+    end
+    if not self:MatchesProfession(id, self:PlayerSkills()) then return true end
+    local alternatives = self:Get(id, "preQuestSingle") or {}
+    if #alternatives > 0 then
+        local anyDone, unknown = false, false
+        for _, previous in ipairs(alternatives) do
+            local done
+            if previous > 0 then done = completed(previous) end
+            if done == true then anyDone = true end
+            if done == nil then unknown = true end
+        end
+        if not anyDone and not unknown then return true end
+    end
+    for _, previous in ipairs(self:Get(id, "preQuestGroup") or {}) do
+        local done = completed(math.abs(previous))
+        if done == false and previous > 0 then
+            for _, alternate in ipairs(self:Get(previous, "exclusiveTo") or {}) do
+                local alternateDone = completed(alternate)
+                if alternateDone == true then done = true; break end
+                if alternateDone == nil then done = nil end
+            end
+        end
+        if done == false then return true end
+    end
 end
 
 local OBJECTIVE_TYPES = {
