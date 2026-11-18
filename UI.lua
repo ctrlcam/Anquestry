@@ -1032,6 +1032,7 @@ function Anquestry.ui:GetRow(index)
         if GameTooltip:IsOwned(button) then GameTooltip:Hide() end
     end)
     row:SetScript("OnClick", function(button)
+        if self.onSelect then self.onSelect(button.questID); return end
         local questID, variants = button.questID, button.info.variants
         self.inspectedQuestID = questID
         for _, questRow in ipairs(self.rows) do
@@ -1180,6 +1181,20 @@ function Anquestry.ui:Refresh(selectedID, reason)
             end
         end
     end
+    local offset = self:RenderTree(chain, highlightedID)
+    local range = summary.minLevel and (summary.minLevel .. "–" .. summary.maxLevel) or "?"
+    self.frame.footer:SetText(("%d/%d done  ·  Lv %s"):format(summary.complete, summary.total, range))
+    local xp = tostring(summary.remainingXP)
+    if summary.unknownXP then xp = summary.remainingXP > 0 and (xp .. "+") or "—" end
+    local totalColor = XP_GRADE_COLORS[summary.xpGrade] or XP_GRADE_COLORS["F-"]
+    self.frame.xpTotal:SetText("|cff" .. totalColor .. xp .. " XP|r")
+    self:FitHeight(offset + 4)
+    local scroll = self.frame.scroll
+    scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
+end
+
+-- Share tree rows and connector rendering between the flyout and the detail browser.
+function Anquestry.ui:RenderTree(chain, highlightedID)
     local groups, offsets, gutter, lanes, joins, offset, links = layoutLinks(chain)
     local nodePositions = self:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
     for i, info in ipairs(chain) do
@@ -1281,13 +1296,21 @@ function Anquestry.ui:Refresh(selectedID, reason)
     end
     for i = #chain + 1, #self.rows do self.rows[i]:Hide() end
     self.frame.content:SetHeight(math.max(1, offset))
-    local range = summary.minLevel and (summary.minLevel .. "–" .. summary.maxLevel) or "?"
-    self.frame.footer:SetText(("%d/%d done  ·  Lv %s"):format(summary.complete, summary.total, range))
-    local xp = tostring(summary.remainingXP)
-    if summary.unknownXP then xp = summary.remainingXP > 0 and (xp .. "+") or "—" end
-    local totalColor = XP_GRADE_COLORS[summary.xpGrade] or XP_GRADE_COLORS["F-"]
-    self.frame.xpTotal:SetText("|cff" .. totalColor .. xp .. " XP|r")
-    self:FitHeight(offset + 4)
-    local scroll = self.frame.scroll
-    scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
+    return offset
+end
+
+function Anquestry.ui:CreateTree(parent, onSelect)
+    local view = setmetatable({ rows = {}, linkArt = {}, onSelect = onSelect }, { __index = self })
+    local scroll = CreateFrame("ScrollFrame", nil, parent)
+    scroll:SetAllPoints()
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(owner, delta)
+        owner:SetVerticalScroll(math.max(0, math.min(owner:GetVerticalScroll() - delta * 44, owner:GetVerticalScrollRange())))
+    end)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(parent:GetWidth(), 1)
+    scroll:SetScrollChild(content)
+    view.frame = { content = content, scroll = scroll }
+    scroll:HookScript("OnSizeChanged", function(owner, width) content:SetWidth(width) end)
+    return view
 end
