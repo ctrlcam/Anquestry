@@ -74,10 +74,25 @@ function Anquestry:Refresh(reason)
     self.ui:Refresh(questID, reason)
 end
 
--- Open or clear a manual quest preview for testing.
+-- Open the quest browser, settings, or a manual quest preview for testing.
 local function handleSlashCommand(message)
     local command, argument = message:match("^%s*(%S*)%s*(.-)%s*$")
     if command == "" then
+        if Anquestry.disabledReason then
+            Anquestry:Print(Anquestry.disabledReason)
+            return
+        end
+        local details = Anquestry.details
+        details:BuildCatalog()
+        local id = details.questID or Anquestry.ui.inspectedQuestID
+            or Anquestry.mapPreviewQuestID or Anquestry:GetTrackedQuestID()
+        if not id or not Anquestry.db:Exists(id) then
+            id = details.catalog[1] and details.catalog[1].id
+        end
+        if id then details:Open(id) end
+        return
+    end
+    if command:lower() == "settings" then
         Anquestry:OpenConfig()
         return
     end
@@ -88,7 +103,7 @@ local function handleSlashCommand(message)
     end
     local id = command:lower() == "test" and argument:match("^%d+$") and tonumber(argument)
     if not id or id <= 0 then
-        Anquestry:Print("Usage: /anquestry test <questID> or /anquestry test off")
+        Anquestry:Print("Usage: /anquestry, /anquestry settings, /anquestry test <questID> or /anquestry test off")
         return
     end
     if not Anquestry.db:Exists(id) then
@@ -161,6 +176,7 @@ function Anquestry:Initialize()
     self.initialized = true
     if type(AnquestrySettings) ~= "table" then AnquestrySettings = {} end
     SLASH_ANQUESTRY1 = "/anquestry"
+    SLASH_ANQUESTRY2 = "/aq"
     SlashCmdList.ANQUESTRY = handleSlashCommand
     local ok, message = self.db:Initialize()
     if not ok then
