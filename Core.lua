@@ -69,7 +69,7 @@ function Anquestry:Refresh(reason)
     local questID = self:GetSelectedQuestID()
     if followMap and self.details and self.details.frame and self.details.frame:IsShown() then
         local preview = self.mapPreviewQuestID or self:GetTrackedQuestID()
-        if preview and preview > 0 and preview ~= self.details.questID then self.details:Open(preview) end
+        if preview and preview > 0 and preview ~= self.details.questID then self.details:Open(preview, true) end
     end
     self.ui:Refresh(questID, reason)
 end
@@ -92,7 +92,7 @@ local function handleSlashCommand(message)
         if id then details:Open(id) end
         return
     end
-    if command:lower() == "settings" then
+    if command:lower() == "settings" or command:lower() == "opt" then
         Anquestry:OpenConfig()
         return
     end
@@ -103,7 +103,7 @@ local function handleSlashCommand(message)
     end
     local id = command:lower() == "test" and argument:match("^%d+$") and tonumber(argument)
     if not id or id <= 0 then
-        Anquestry:Print("Usage: /anquestry, /anquestry settings, /anquestry test <questID> or /anquestry test off")
+        Anquestry:Print("Usage: /anquestry, /anquestry opt (or settings), /anquestry test <questID> or /anquestry test off")
         return
     end
     if not Anquestry.db:Exists(id) then

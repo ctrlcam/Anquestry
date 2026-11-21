@@ -118,8 +118,6 @@ function Anquestry:RegisterConfig()
         right:SetGradient("HORIZONTAL", tan, faded)
         self.config = panel
 
-        local showInfo = addCheckbox(panel, -66, "Show Quest Info", "showQuestInfo", function() self:Refresh("SETTINGS") end)
-        addTooltip(showInfo, "Show Quest Info", "Show the Quest Info panel below the quest list.")
 
         local range = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         range:SetPoint("TOPLEFT", 23, -111)

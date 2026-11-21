@@ -481,6 +481,7 @@ local function syncQuestLogArt(frame)
         band:SetTexCoord(left + dx, right - dx, top + dy, bottom - dy)
         band:SetVertexColor(sourceBand:GetVertexColor())
     end
+    if not frame.questLogArt then return end
     local source = QuestScrollFrame and QuestScrollFrame.Background
     if not source then return end
     local atlas = source:GetAtlas()
@@ -528,22 +529,44 @@ local function createHeaderBand(frame, onClick)
     return band, button
 end
 
--- Keep the native close art in place and darken it while pressed.
-local function createPanelCloseButton(parent)
-    local button = CreateFrame("Button", nil, parent, "UIPanelCloseButton")
-    button:SetSize(22, 20)
-    local normal, pushed = button:GetNormalTexture(), button:GetPushedTexture()
-    if normal and pushed then
-        local atlas = normal:GetAtlas()
-        if atlas then
-            pushed:SetAtlas(atlas, false)
-        else
-            pushed:SetTexture(normal:GetTexture())
+-- Use one standard red button skin with a single, separate foreground symbol.
+local function createHeaderIconButton(parent, iconTexture)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(24, 22)
+    button.backgroundArt = {}
+    for _, region in ipairs({ button:GetRegions() }) do
+        if region:IsObjectType("Texture") then
+            region:SetVertexColor(1, 0.78, 0.5)
+            button.backgroundArt[#button.backgroundArt + 1] = region
         end
-        pushed:SetTexCoord(normal:GetTexCoord())
-        pushed:ClearAllPoints()
-        pushed:SetAllPoints(normal)
-        pushed:SetVertexColor(0.78, 0.78, 0.78)
+    end
+    if iconTexture == "tags" then
+        local icon = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        icon:SetFont(STANDARD_TEXT_FONT, 15, "")
+        icon:SetAllPoints(button)
+        icon:SetJustifyH("CENTER")
+        icon:SetJustifyV("MIDDLE")
+        icon:SetShadowOffset(0, 0)
+        icon:SetText("#")
+        button.icon = icon
+    elseif iconTexture then
+        local icon = button:CreateTexture(nil, "OVERLAY", nil, 7)
+        icon:SetSize(13, 13)
+        icon:SetPoint("CENTER")
+        icon:SetTexture(iconTexture)
+        button.icon = icon
+    else
+        local icon = button:CreateTexture(nil, "OVERLAY", nil, 7)
+        icon:SetSize(13, 13)
+        icon:SetPoint("CENTER")
+        if C_Texture and C_Texture.GetAtlasInfo("common-icon-redx") then
+            icon:SetAtlas("common-icon-redx")
+        else
+            icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
+        end
+        icon:SetDesaturated(true)
+        icon:SetVertexColor(1, 0.82, 0)
+        button.icon = icon
     end
     return button
 end
@@ -551,7 +574,6 @@ end
 -- Create the flyout and hook it into Blizzard’s quest windows.
 function Anquestry.ui:Initialize()
     if self.frame then return end
-    self.infoCollapsed = AnquestrySettings.infoCollapsed == true
     local f = CreateFrame("Frame", "AnquestryFlyout", UIParent, BackdropTemplateMixin and "BackdropTemplate")
     f:SetSize(PANEL_WIDTH, 70)
     f:SetIgnoreParentScale(true)
@@ -561,12 +583,17 @@ function Anquestry.ui:Initialize()
     f:HookScript("OnSizeChanged", syncQuestLogArt)
     self.frame = f
 
-    f.headerBand, f.headerButton = createHeaderBand(f, function() self:SetCollapsed(true) end)
+    f.headerBand, f.headerButton = createHeaderBand(f)
+    f.headerButton:EnableMouse(false)
 
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     f.title:SetPoint("TOPLEFT", 30, -11)
     f.title:SetJustifyH("LEFT")
     f.title:SetText("Anquestry")
+    f.titleButton = CreateFrame("Button", nil, f)
+    f.titleButton:SetPoint("TOPLEFT", f.title, "TOPLEFT", 0, 3)
+    f.titleButton:SetSize(f.title:GetStringWidth(), 22)
+    f.titleButton:SetScript("OnClick", function() self:SetCollapsed(not self.collapsed) end)
     f.launcher = CreateFrame("Button", nil, f)
     f.launcher:SetSize(22, 22)
     f.launcher:SetPoint("TOPLEFT", 6, -6)
@@ -581,12 +608,44 @@ function Anquestry.ui:Initialize()
     f.launcher:SetScript("OnLeave", function(button)
         if GameTooltip:IsOwned(button) then GameTooltip:Hide() end
     end)
-    f.toggle = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.toggle:SetSize(22, 20)
-    f.toggle:SetPoint("TOPRIGHT", -8, -7)
-    f.toggle:SetText("−")
-    f.toggle:SetScript("OnClick", function() self:SetCollapsed(true) end)
-
+    local function quickToggle(key, texture, label, right)
+        local control = createHeaderIconButton(f, texture)
+        if right then control:SetPoint("RIGHT", right, "LEFT", -2, 0)
+        else control:SetPoint("TOPRIGHT", -8, -3) end
+        local icon = control.icon
+        local function updateIcon(enabled)
+            local shade = enabled and 1 or 0.8
+            for _, art in ipairs(control.backgroundArt) do
+                art:SetDesaturated(not enabled)
+                if enabled then art:SetVertexColor(1, 0.78, 0.5)
+                else art:SetVertexColor(shade, shade, shade) end
+            end
+            if icon:IsObjectType("Texture") then
+                icon:SetDesaturated(not enabled)
+                icon:SetVertexColor(shade, shade, shade)
+            else
+                if enabled then icon:SetTextColor(1, 0.82, 0)
+                else icon:SetTextColor(0.65, 0.65, 0.65) end
+            end
+        end
+        control:SetScript("OnClick", function()
+            AnquestrySettings[key] = AnquestrySettings[key] == false
+            updateIcon(AnquestrySettings[key])
+            Anquestry:Refresh("SETTINGS")
+            if Anquestry.details then Anquestry.details:ScheduleRefresh() end
+        end)
+        updateIcon(AnquestrySettings[key] ~= false)
+        control:SetScript("OnEnter", function(button)
+            GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+            GameTooltip:SetText(label)
+            GameTooltip:Show()
+        end)
+        control:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return control
+    end
+    f.endpointToggle = quickToggle("showEndpointIcons", "Interface\\GossipFrame\\AvailableQuestIcon", "Start/end NPCs")
+    f.objectiveToggle = quickToggle("showObjectiveIcons", "tags", "Tags", f.endpointToggle)
+    f.title:SetPoint("RIGHT", f.objectiveToggle, "LEFT", -4, 0)
     f.scroll = CreateFrame("ScrollFrame", nil, f)
     f.scroll:SetPoint("TOPLEFT", 5, -HEADER_HEIGHT); f.scroll:SetPoint("BOTTOMRIGHT", -5, 26)
     f.footerBand = f:CreateTexture(nil, "BACKGROUND", nil, 2)
@@ -692,10 +751,11 @@ end
 -- Switch between the full panel and the title bar.
 function Anquestry.ui:SetCollapsed(collapsed)
     self.collapsed = collapsed
-    if collapsed and self.urlPopup then self.urlPopup:Hide() end
     local f = self.frame
     f.title:SetShown(not collapsed)
-    f.toggle:SetShown(not collapsed)
+    f.titleButton:SetShown(not collapsed)
+    f.endpointToggle:SetShown(not collapsed)
+    f.objectiveToggle:SetShown(not collapsed)
     f.headerBand:SetShown(not collapsed)
     f.headerButton:SetShown(not collapsed)
     if collapsed then f.questLogArt:Hide() end
@@ -712,7 +772,12 @@ end
 function Anquestry.ui:FitHeight(contentHeight)
     self.contentHeight = contentHeight
     local footerHeight = math.max(26, self.frame.footer:GetStringHeight() + 15)
-    self.frame.scroll:SetPoint("BOTTOMRIGHT", -5, footerHeight)
+    local infoHeight = 0
+    self.frame.scroll:SetPoint("BOTTOMRIGHT", -5, footerHeight + infoHeight)
+    self.frame.footer:SetPoint("BOTTOMLEFT", 12, 9 + infoHeight)
+    self.frame.footer:SetPoint("BOTTOMRIGHT", -100, 9 + infoHeight)
+    self.frame.xpTotal:SetPoint("BOTTOMRIGHT", -8, 9 + infoHeight)
+    self.frame.footerBand:SetPoint("BOTTOMRIGHT", -3, 5 + infoHeight)
     local host = self.anchor
     if host == QuestMapFrame then host = WorldMapFrame or host end
     local maxHeight = STANDALONE_MAX_HEIGHT
@@ -720,23 +785,22 @@ function Anquestry.ui:FitHeight(contentHeight)
         maxHeight = host:GetHeight() * host:GetEffectiveScale() / self.frame:GetEffectiveScale()
     end
     local top, bottom = self.frame:GetTop(), UIParent:GetBottom()
-    if top and bottom and self.urlPopup and self.urlPopup:IsShown() then
+    if top and bottom and infoHeight > 0 then
         local space = top - bottom * UIParent:GetEffectiveScale() / self.frame:GetEffectiveScale()
-        maxHeight = math.min(maxHeight, math.max(HEADER_HEIGHT + footerHeight + 22,
-            space - self.urlPopup:GetHeight() - 3))
+        maxHeight = math.min(maxHeight, math.max(HEADER_HEIGHT + footerHeight + infoHeight + 22, space))
     end
-    self.expandedHeight = math.min(maxHeight, HEADER_HEIGHT + contentHeight + footerHeight)
+    self.expandedHeight = math.min(maxHeight, HEADER_HEIGHT + contentHeight + footerHeight + infoHeight)
     if not self.collapsed then self.frame:SetHeight(self.expandedHeight) end
 end
 
 -- Create a hoverable icon with its own tooltip.
 local function createIconTag(row, texture)
     local tag = CreateFrame("Frame", nil, row)
-    tag:SetSize(15, 18)
+    tag:SetSize(13, 18)
     tag:EnableMouse(true)
     tag.icon = tag:CreateTexture(nil, "ARTWORK")
     tag.icon:SetSize(11, 11)
-    tag.icon:SetPoint("LEFT", 2, 0)
+    tag.icon:SetPoint("LEFT", 1, 0)
     tag.icon:SetTexture(texture)
     tag:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -844,143 +908,6 @@ function Anquestry.ui:AlignEndpoint(button, label, starts, width)
     end
 end
 
--- Update the docked details for one quest or location variant.
-function Anquestry.ui:ShowWowheadURL(questID, variants)
-    if AnquestrySettings.showQuestInfo == false then return end
-    local popup = self.urlPopup
-    if not popup then
-        popup = CreateFrame("Frame", nil, self.frame, BackdropTemplateMixin and "BackdropTemplate")
-        popup:SetHeight(76)
-        popup:SetPoint("TOPLEFT", self.frame, "BOTTOMLEFT", 0, -3)
-        popup:SetPoint("TOPRIGHT", self.frame, "BOTTOMRIGHT", 0, -3)
-        self.frame:HookScript("OnHide", function() popup:Hide() end)
-        popup:EnableMouse(true)
-        backdrop(popup)
-        local function toggleInfo()
-            self.infoCollapsed = not self.infoCollapsed
-            AnquestrySettings.infoCollapsed = self.infoCollapsed
-            self:ShowWowheadURL(popup.questID, popup.variants)
-        end
-        popup.headerBand, popup.headerButton = createHeaderBand(popup, toggleInfo)
-
-        local title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        title:SetPoint("TOPLEFT", 12, -11)
-        title:SetText("Quest Info")
-        local toggle = CreateFrame("Button", nil, popup.headerButton, "UIPanelButtonTemplate")
-        toggle:SetSize(22, 20)
-        toggle:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -8, -7)
-        toggle:SetScript("OnClick", toggleInfo)
-        popup.toggle = toggle
-
-        local editBox = self:CreateURLField(popup)
-        editBox:SetPoint("BOTTOMLEFT", 10, 9)
-        editBox:SetPoint("BOTTOMRIGHT", -10, 9)
-        popup.details = CreateFrame("Button", nil, popup.headerButton, "UIPanelButtonTemplate")
-        popup.details:SetPoint("RIGHT", toggle, "LEFT", -6, 0)
-        popup.details:SetSize(66, 20)
-        popup.details:SetText("Details")
-        popup.details:SetScript("OnClick", function() Anquestry.details:Open(popup.questID) end)
-        popup.endpoints = {}
-        popup.locationPicker = CreateFrame("DropdownButton", nil, popup, "WowStyle1DropdownTemplate")
-        popup.locationPicker:SetPoint("TOPLEFT", 10, -35)
-        popup.locationPicker:SetPoint("RIGHT", popup, "RIGHT", -10, 0)
-        popup:SetScript("OnHide", function()
-            self.locationQuestID = nil
-            editBox:ClearFocus()
-        end)
-        popup.editBox = editBox
-        self.urlPopup = popup
-    end
-    if popup.questID ~= questID or self.infoCollapsed then popup.editBox:ClearFocus() end
-    popup.questID, popup.variants = questID, variants
-    popup.toggle:SetText(self.infoCollapsed and "+" or "−")
-    popup.editBox:SetShown(not self.infoCollapsed)
-    if self.infoCollapsed then
-        popup.locationPicker:Hide()
-        for _, button in ipairs(popup.endpoints) do button:Hide() end
-        popup:SetHeight(HEADER_HEIGHT)
-        popup:Show()
-        syncQuestLogArt(popup)
-        if self.contentHeight then self:FitHeight(self.contentHeight) end
-        return
-    end
-    local grouped = variants and #variants > 1
-    popup.locationPicker:SetShown(not not grouped)
-    if grouped then
-        popup.locationPicker:SetupMenu(function(_, root)
-            root:CreateTitle("Quest location")
-            for _, id in ipairs(variants) do
-                local variantID = id
-                local starter = Anquestry.db:QuestEndpoints(variantID)[1]
-                local point = starter and starter.starts and Anquestry.db:FindMapPoint(starter.spawns)
-                local map = point and C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(point.map)
-                local label = starter and starter.starts and starter.name or ("Quest " .. variantID)
-                if map and map.name then label = label .. " · " .. map.name end
-                root:CreateRadio(label, function() return popup.questID == variantID end, function()
-                    C_Timer.After(0, function()
-                        if popup:IsShown() and popup.variants == variants then
-                            self:ShowWowheadURL(variantID, variants)
-                        end
-                    end)
-                end)
-            end
-        end)
-    end
-    local pickerHeight = grouped and 28 or 0
-    local endpoints = Anquestry.db:QuestEndpoints(questID)
-    for index, endpoint in ipairs(endpoints) do
-        local button = popup.endpoints[index]
-        if not button then
-            button = CreateFrame("Button", nil, popup)
-            button:SetHeight(20)
-            button.icon = button:CreateTexture(nil, "ARTWORK")
-            button.icon:SetSize(13, 13)
-            button.icon:SetPoint("LEFT")
-            button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            button.label:SetPoint("LEFT", button.icon, "RIGHT", 6, 0)
-            button.label:SetPoint("RIGHT")
-            button.label:SetJustifyH("LEFT")
-            button.label:SetMaxLines(1)
-            button:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
-            button:SetScript("OnClick", function(clicked)
-                if not clicked.point then return end
-                local questID = self.lastSelected or popup.questID
-                self.openingQuestLocation = true
-                local opened = self:ShowEndpointOnMap(clicked.point)
-                self.openingQuestLocation = false
-                if opened then
-                    self.locationQuestID = questID
-                    Anquestry:Refresh("QUEST_LOCATION")
-                end
-            end)
-            popup.endpoints[index] = button
-        end
-        button:ClearAllPoints()
-        local width = (popup:GetWidth() - 24) / #endpoints
-        button:SetPoint("TOPLEFT", 12 + (index - 1) * width, -36 - pickerHeight)
-        local cellWidth = width - (index < #endpoints and 6 or 0)
-        button:SetWidth(cellWidth)
-        button.point = Anquestry.db:FindMapPoint(endpoint.spawns)
-        button:EnableMouse(button.point ~= nil)
-        button.icon:SetTexture(endpoint.starts and "Interface\\GossipFrame\\AvailableQuestIcon"
-            or "Interface\\GossipFrame\\ActiveQuestIcon")
-        button.label:SetText(endpoint.name)
-        self:AlignEndpoint(button, button.label, endpoint.starts, cellWidth)
-        local shade = button.point and 1 or 0.65
-        button.label:SetTextColor(shade, shade, shade)
-        button:Show()
-    end
-    for index = #endpoints + 1, #popup.endpoints do popup.endpoints[index]:Hide() end
-    popup:SetHeight(77 + pickerHeight + (#endpoints > 0 and 20 or 0))
-    popup:Show()
-    syncQuestLogArt(popup)
-    if self.contentHeight then self:FitHeight(self.contentHeight) end
-    local url = "wowhead.com/forever/quest=" .. questID
-    popup.editBox.copyURL = url
-    popup.editBox:SetText(url)
-    popup.editBox:SetCursorPosition(#url)
-end
-
 -- Reuse or create a clickable quest row.
 function Anquestry.ui:GetRow(index)
     local row = self.rows[index]
@@ -1002,9 +929,48 @@ function Anquestry.ui:GetRow(index)
     row.strike:Hide()
     row.xp = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.xp:SetPoint("RIGHT", -3, 0)
+    row.startNPC = createIconTag(row, "Interface\\GossipFrame\\AvailableQuestIcon")
+    row.endNPC = createIconTag(row, "Interface\\GossipFrame\\ActiveQuestIcon")
+    for _, tag in ipairs({ row.startNPC, row.endNPC }) do
+        tag:SetScript("OnMouseUp", function(owner, mouseButton)
+            if mouseButton ~= "LeftButton" or not owner.point then return end
+            Anquestry.ui.openingQuestLocation = true
+            local opened = Anquestry.ui:ShowEndpointOnMap(owner.point)
+            Anquestry.ui.openingQuestLocation = false
+            if opened then Anquestry.ui.locationQuestID = row.questID end
+        end)
+    end
+    row:SetScript("OnDoubleClick", function(button)
+        Anquestry.details:Open(button.questID)
+    end)
     row.objective = createIconTag(row, nil)
     row.locationTag = createIconTag(row, 134149)
     row.locationTag.icon:SetTexCoord(0.09, 0.91, 0.09, 0.91)
+    row.locationTag:SetScript("OnMouseUp", function(owner, mouseButton)
+        local variants = row.info and row.info.variants
+        if mouseButton ~= "LeftButton" or not variants or not MenuUtil then return end
+        MenuUtil.CreateContextMenu(owner, function(_, root)
+            root:CreateTitle("Quest location")
+            for _, id in ipairs(variants) do
+                local variantID = id
+                local starter = Anquestry.db:QuestEndpoints(id)[1]
+                local point = starter and starter.starts and Anquestry.db:FindMapPoint(starter.spawns)
+                local map = point and C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(point.map)
+                local label = starter and starter.name or ("Quest " .. id)
+                if map and map.name then label = label .. " - " .. map.name end
+                root:CreateButton(label, function()
+                    if self.onSelect then self.onSelect(variantID)
+                    else self.inspectedQuestID = row.questID end
+                    if point then
+                        Anquestry.ui.openingQuestLocation = true
+                        local opened = Anquestry.ui:ShowEndpointOnMap(point)
+                        Anquestry.ui.openingQuestLocation = false
+                        if opened then Anquestry.ui.locationQuestID = row.questID end
+                    end
+                end)
+            end
+        end)
+    end)
     row.travel = createIconTag(row, 3193420)
     row.travel.icon:SetTexCoord(0.09, 0.91, 0.09, 0.91)
     row.dungeon = createIconTag(row, nil)
@@ -1038,7 +1004,6 @@ function Anquestry.ui:GetRow(index)
         for _, questRow in ipairs(self.rows) do
             questRow.highlight:SetShown(questRow == button)
         end
-        self:ShowWowheadURL(questID, variants)
         local index = C_QuestLog and C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
         if index and index > 0 then
             Anquestry.mapPreviewQuestID = nil
@@ -1095,9 +1060,6 @@ function Anquestry.ui:Refresh(selectedID, reason)
     self.frame:SetScale(UIParent:GetEffectiveScale())
     self.frame:SetFrameStrata(owner:GetFrameStrata())
     self.frame:SetFrameLevel(owner:GetFrameLevel() + 1)
-    if Anquestry.details and Anquestry.details.frame and Anquestry.details.frame:IsShown() then
-        Anquestry.details:SyncMapLayer()
-    end
     local inset = 0
     if anchor == QuestMapFrame or anchor == WorldMapFrame then
         local border = WorldMapFrame and WorldMapFrame.BorderFrame
@@ -1143,10 +1105,6 @@ function Anquestry.ui:Refresh(selectedID, reason)
         return
     end
     if self.collapsed then return end
-    local showInfo = AnquestrySettings.showQuestInfo ~= false
-    if not showInfo and self.urlPopup then self.urlPopup:Hide() end
-    local infoVisible = self.urlPopup and self.urlPopup:IsShown()
-    if (infoVisible or not showInfo) and selectedID == self.lastSelected and (reason == "QUEST_LOG_UPDATE" or reason == "QuestLog_Update" or reason == "SELECTION" or reason == "SUPER_TRACKING_CHANGED") then return end
     local selectionChanged = selectedID ~= self.lastSelected
     if selectionChanged then
         self.inspectedQuestID = nil
@@ -1155,7 +1113,6 @@ function Anquestry.ui:Refresh(selectedID, reason)
     self.lastSelected = selectedID
     local chain = Anquestry.resolver:Resolve(selectedID)
     if #chain == 0 then
-        if self.urlPopup then self.urlPopup:Hide() end
         self:DrawLinks({}, {}, 0, 0)
         self.frame.xpTotal:SetText("")
         for _, row in ipairs(self.rows) do row:Hide() end
@@ -1173,14 +1130,6 @@ function Anquestry.ui:Refresh(selectedID, reason)
     local inspectionLost = self.inspectedQuestID and not inspected
     if inspectionLost then self.inspectedQuestID = nil end
     local highlightedID = self.inspectedQuestID or selectedID
-    if selectionChanged or not infoVisible or inspectionLost then
-        for _, info in ipairs(chain) do
-            if info.id == highlightedID then
-                self:ShowWowheadURL(highlightedID, info.variants)
-                break
-            end
-        end
-    end
     local offset = self:RenderTree(chain, highlightedID)
     local range = summary.minLevel and (summary.minLevel .. "–" .. summary.maxLevel) or "?"
     self.frame.footer:SetText(("%d/%d done  ·  Lv %s"):format(summary.complete, summary.total, range))
@@ -1243,28 +1192,32 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
         local xpText = info.xp and (tostring(info.xp) .. " XP") or "—"
         local color = done and "878787" or info.xp and XP_GRADE_COLORS[info.xpGrade]
         row.xp:SetText(color and ("|cff" .. color .. xpText .. "|r") or xpText)
-        local kinds = Anquestry.db:ObjectiveTypes(info.id)
+        local showTags = AnquestrySettings.showObjectiveIcons ~= false
+        local kinds = showTags and Anquestry.db:ObjectiveTypes(info.id) or {}
         local kind = kinds[1]
         row.objective:SetShown(kind ~= nil)
         if kind then
             row.objective.icon:SetTexture(Anquestry.db:ObjectiveTexture(kind))
             row.objective.tooltip = kind.label
         end
-        local tagInset = 6 + row.xp:GetStringWidth()
-        local dungeon = Anquestry.db:IsDungeonQuest(info.id)
+        local npcInset = AnquestrySettings.showEndpointIcons ~= false and 28 or 0
+        row.xp:ClearAllPoints()
+        row.xp:SetPoint("RIGHT", -3 - npcInset, 0)
+        local tagInset = 4 + npcInset + row.xp:GetStringWidth()
+        local dungeon = showTags and Anquestry.db:IsDungeonQuest(info.id)
         row.dungeon:SetShown(dungeon)
         if dungeon then
             row.dungeon:ClearAllPoints()
             row.dungeon:SetPoint("RIGHT", -tagInset, 0)
-            tagInset = tagInset + row.dungeon:GetWidth() + 3
+            tagInset = tagInset + row.dungeon:GetWidth() + 1
         end
         if kind then
             row.objective:ClearAllPoints()
             row.objective:SetPoint("RIGHT", -tagInset, 0)
-            tagInset = tagInset + row.objective:GetWidth() + 3
+            tagInset = tagInset + row.objective:GetWidth() + 1
         end
         local threshold = Anquestry:GetTravelThreshold()
-        local travel = threshold > 0 and Anquestry.db:TravelDistance(info.id)
+        local travel = showTags and threshold > 0 and Anquestry.db:TravelDistance(info.id)
         local distant = travel and (travel.differentContinents or travel.yards > threshold)
         row.travel:SetShown(not not distant)
         if distant then
@@ -1272,14 +1225,31 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
                 or ("%d yards"):format(math.floor(travel.yards + 0.5))
             row.travel:ClearAllPoints()
             row.travel:SetPoint("RIGHT", -tagInset, 0)
-            tagInset = tagInset + row.travel:GetWidth() + 3
+            tagInset = tagInset + row.travel:GetWidth() + 1
         end
-        row.locationTag:SetShown(info.locations ~= nil)
-        if info.locations then
+        row.locationTag:SetShown(showTags and info.locations ~= nil)
+        if showTags and info.locations then
             row.locationTag.tooltip = (info.alternatives and "%d alternative starters" or "%d locations"):format(info.locations)
             row.locationTag:ClearAllPoints()
             row.locationTag:SetPoint("RIGHT", -tagInset, 0)
-            tagInset = tagInset + row.locationTag:GetWidth() + 3
+            tagInset = tagInset + row.locationTag:GetWidth() + 1
+        end
+        local endpoints = AnquestrySettings.showEndpointIcons ~= false and Anquestry.db:QuestEndpoints(info.id) or {}
+        for _, tag in ipairs({ row.startNPC, row.endNPC }) do
+            local starts = tag == row.startNPC
+            local names, point = {}, nil
+            for _, endpoint in ipairs(endpoints) do
+                if endpoint.starts == starts then
+                    names[#names + 1] = endpoint.name
+                    point = point or Anquestry.db:FindMapPoint(endpoint.spawns)
+                end
+            end
+            tag.tooltipLines, tag.point = names, point
+            tag:SetShown(#names > 0)
+            if #names > 0 then
+                tag:ClearAllPoints()
+                tag:SetPoint("RIGHT", starts and -16 or -2, 0)
+            end
         end
         row.text:SetPoint("RIGHT", -tagInset - 3, 0)
         local level = info.level and info.level > 0 and ("[" .. info.level .. "] ") or ""

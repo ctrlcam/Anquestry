@@ -30,166 +30,10 @@ local function button(parent, label, width, onClick)
     return control
 end
 
-local function mapLogShown(map)
-    if map.IsSidePanelShown then return map:IsSidePanelShown() end
-    local log = map.QuestLog or QuestMapFrame
-    if log then return log:IsShown() end
-end
-
--- A raised map can reorder its whole frame tree, so Details needs the next stratum.
+-- Share the map's drawing stratum; normal top-level focus controls which window is in front.
 function details:SyncMapLayer()
-    local flyout, map = Anquestry.ui.frame, WorldMapFrame
-    local host = map and map:IsShown() and map or flyout
-    if not host then return end
-    local strata, level = host:GetFrameStrata(), host:GetFrameLevel()
-    local order = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5,
-        FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
-    for _, control in ipairs({ flyout, flyout and flyout.launcher }) do
-        local controlStrata = control:GetFrameStrata()
-        if (order[controlStrata] or 0) > (order[strata] or 0) then
-            strata, level = controlStrata, control:GetFrameLevel()
-        elseif controlStrata == strata then
-            level = math.max(level, control:GetFrameLevel())
-        end
-    end
-    local above = { BACKGROUND = "LOW", LOW = "MEDIUM", MEDIUM = "HIGH", HIGH = "DIALOG",
-        DIALOG = "FULLSCREEN", FULLSCREEN = "FULLSCREEN_DIALOG" }
-    local detailStrata = above[strata] or strata
-    if self.frame:GetFrameStrata() ~= detailStrata then self.frame:SetFrameStrata(detailStrata) end
-    if self.frame:GetFrameLevel() ~= level + 1 then self.frame:SetFrameLevel(level + 1) end
-end
-
--- Reflow once after resizing stops, using the same flyout refresh as a log-panel toggle.
-function details:QueueMapResize()
-    if not self.frame or not self.frame:IsShown() then return end
-    self.resizeGeneration = (self.resizeGeneration or 0) + 1
-    local generation = self.resizeGeneration
-    C_Timer.After(0.3, function()
-        if generation ~= self.resizeGeneration or not self.frame:IsShown()
-            or not WorldMapFrame or not WorldMapFrame:IsShown() then return end
-        Anquestry:Refresh("SHOW")
-        local flyout = Anquestry.ui.frame
-        if flyout and flyout:IsShown() then
-            self.frame:ClearAllPoints()
-            self.frame:SetPoint("TOPLEFT", flyout, "TOPLEFT")
-        end
-        self:SyncMapLayer()
-        self:FitToMap()
-        self:ScheduleRefresh()
-    end)
-end
-
--- Match the visible map bounds, including Leatrix's replacement border and footer.
-function details:FitToMap()
-    local map = WorldMapFrame
-    if not map or not map:IsShown() then return end
-    local border = map.BorderFrame or map
-    local close = border.CloseButton
-    local titleBar, relativePoint
-    if close then
-        local _, relative, point = close:GetPoint(1)
-        titleBar, relativePoint = relative, point
-    end
-    if relativePoint == "RIGHT" and titleBar then
-        for _, child in ipairs({ map:GetChildren() }) do
-            local found = false
-            for index = 1, child:GetNumPoints() do
-                local point, relative = child:GetPoint(index)
-                if point == "TOPLEFT" and relative == titleBar and child:IsShown() then
-                    border = child
-                    found = true
-                    break
-                end
-            end
-            if found then break end
-        end
-    end
-    local scale = self.frame:GetEffectiveScale()
-    if border ~= map and border ~= map.BorderFrame then
-        self.resizeBorders = self.resizeBorders or {}
-        if not self.resizeBorders[border] then
-            self.resizeBorders[border] = true
-            border:HookScript("OnSizeChanged", function() self:QueueMapResize() end)
-        end
-    end
-    local top, bottom = self.frame:GetTop(), border:GetBottom()
-    local height
-    if top and bottom then
-        height = (top * scale - bottom * border:GetEffectiveScale()) / scale
-    else
-        height = border:GetHeight() * border:GetEffectiveScale() / scale
-        if height <= 0 then height = map:GetHeight() * map:GetEffectiveScale() / scale end
-    end
-    if height <= 0 then return end
-    local changed = math.abs(self.frame:GetHeight() - height) > 0.5
-    if changed then self.frame:SetHeight(height) end
-    local pageSize = math.max(1, math.min(PAGE_SIZE, math.floor((height - 150) / 23)))
-    if pageSize ~= self.pageSize then changed = true; self.pageSize = pageSize end
-    return changed
-end
-
--- Use the map's normal side-panel toggle without reopening a hidden map.
-function details:ApplyMapLogState()
-    local pending = self.pendingMapLog
-    if not pending or not pending.map:IsShown() or (InCombatLockdown and InCombatLockdown()) then return end
-    self.pendingMapLog = nil
-    if mapLogShown(pending.map) ~= pending.shown and pending.map.HandleUserActionToggleSidePanel then
-        pending.map:HandleUserActionToggleSidePanel()
-        if pending.map.SidePanelToggle and pending.map.SidePanelToggle.Refresh then
-            pending.map.SidePanelToggle:Refresh()
-        end
-    end
-end
-
--- Save the surrounding panels only once, rather than on each inspected quest.
-function details:BeginLayout()
-    if self.layoutSession then return end
-    local ui, map = Anquestry.ui, WorldMapFrame
-    local session = {}
-    self.layoutSession = session
-    if ui.frame then
-        session.flyoutCollapsed = ui.collapsed
-        ui:SetCollapsed(true)
-    end
-    if map and map:IsShown() and map.HandleUserActionToggleSidePanel then
-        session.map, session.mapLogShown = map, mapLogShown(map)
-        if session.mapLogShown ~= nil then
-            self.pendingMapLog = { map = map, shown = false }
-            self:ApplyMapLogState()
-        end
-        if not self.layoutMapHooked then
-            map:HookScript("OnShow", function()
-                C_Timer.After(0, function()
-                    self:ApplyMapLogState()
-                    self:QueueMapResize()
-                end)
-            end)
-            local function resized() self:QueueMapResize() end
-            map:HookScript("OnSizeChanged", resized)
-            if map.BorderFrame then map.BorderFrame:HookScript("OnSizeChanged", resized) end
-            hooksecurefunc(map, "SetScale", resized)
-            self.layoutMapHooked = true
-        end
-    end
-    self:SyncMapLayer()
-    if ui.frame and ui.frame:IsShown() then
-        self.frame:ClearAllPoints()
-        self.frame:SetPoint("TOPLEFT", ui.frame, "TOPLEFT")
-    end
-end
-
--- Restore the exact states that preceded this detail-window session.
-function details:EndLayout()
-    local session = self.layoutSession
-    if not session then return end
-    self.layoutSession = nil
-    if session.map and session.mapLogShown ~= nil then
-        self.pendingMapLog = { map = session.map, shown = session.mapLogShown }
-        self:ApplyMapLogState()
-    end
-    if session.flyoutCollapsed ~= nil and Anquestry.ui.frame then
-        Anquestry.ui:SetCollapsed(session.flyoutCollapsed)
-    end
+    local strata = WorldMapFrame and WorldMapFrame:GetFrameStrata() or "HIGH"
+    if self.frame:GetFrameStrata() ~= strata then self.frame:SetFrameStrata(strata) end
 end
 
 -- Coalesce client updates without resetting the reader's scroll position.
@@ -669,6 +513,10 @@ function details:Initialize()
     frame:SetPoint("CENTER")
     frame:SetClampedToScreen(true)
     frame:SetToplevel(true)
+    self:SyncMapLayer()
+    if WorldMapFrame then
+        WorldMapFrame:HookScript("OnShow", function() self:SyncMapLayer() end)
+    end
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:SetTitle("Anquestry")
@@ -969,9 +817,7 @@ function details:Initialize()
     frame:RegisterEvent("QUEST_LOG_UPDATE")
     frame:RegisterEvent("PLAYER_LEVEL_UP")
     frame:RegisterEvent("SKILL_LINES_CHANGED")
-    frame:RegisterEvent("PLAYER_REGEN_ENABLED")
     frame:SetScript("OnEvent", function(_, event, id, success)
-        if event == "PLAYER_REGEN_ENABLED" then self:ApplyMapLogState() end
         if event == "QUEST_DATA_LOAD_RESULT" then
             local request = self.requests[id]
             if request then
@@ -986,8 +832,6 @@ function details:Initialize()
         end
     end)
     frame:SetScript("OnHide", function()
-        self.resizeGeneration = (self.resizeGeneration or 0) + 1
-        self:EndLayout()
         frame:StopMovingOrSizing()
         frame.search:ClearFocus()
         frame.minLevel:ClearFocus()
@@ -1000,7 +844,7 @@ function details:Initialize()
 end
 
 -- Open a quest's independent preview and request its client data on demand.
-function details:Open(id)
+function details:Open(id, keepFocus)
     if not Anquestry.db:Exists(id) then return end
     self:Initialize()
     self:BuildCatalog()
@@ -1012,10 +856,9 @@ function details:Open(id)
     self.questID = id
     self.frame:SetScale(math.min(1, (UIParent:GetWidth() - 30) / WINDOW_WIDTH,
         (UIParent:GetHeight() - 30) / WINDOW_HEIGHT))
-    self:BeginLayout()
+    self:SyncMapLayer()
     self.frame:Show()
-    self:FitToMap()
-    self.frame:Raise()
+    if not keepFocus then self.frame:Raise() end
     self:Search()
     if changed then
         for index, entry in ipairs(self.matches) do
