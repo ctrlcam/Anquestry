@@ -948,7 +948,7 @@ function Anquestry.ui:GetRow(index)
         end)
     end
     row:SetScript("OnDoubleClick", function(button)
-        Anquestry.details:Open(button.questID)
+        Anquestry.details:Open(button.questID, false, true)
     end)
     row.objective = createIconTag(row, nil)
     row.locationTag = createIconTag(row, 134149)

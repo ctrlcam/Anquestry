@@ -905,7 +905,7 @@ function details:Initialize()
 end
 
 -- Open a quest's independent preview and request its client data on demand.
-function details:Open(id, keepFocus)
+function details:Open(id, keepFocus, focusURL)
     if not Anquestry.db:Exists(id) then return end
     self:Initialize()
     self:BuildCatalog()
@@ -932,4 +932,8 @@ function details:Open(id, keepFocus)
     end
     self:RequestData(id)
     self:Render()
+    if focusURL then
+        self.frame.url:SetFocus()
+        self.frame.url:HighlightText()
+    end
 end
