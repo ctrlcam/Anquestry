@@ -269,6 +269,84 @@ function details:AddEndpoint(endpoint, count)
     control:Show()
 end
 
+-- Inspect only the selected quest's required items; item metadata is client-cached.
+function details:AddRequiredItems(id)
+    local objectives = Anquestry.db:Get(id, "objectives") or {}
+    local counts = {}
+    local live = readAPI(C_QuestLog and C_QuestLog.GetQuestObjectives, id) or {}
+    for _, objective in ipairs(live) do
+        if objective.type == "item" and objective.objectID then
+            counts[objective.objectID] = objective.numRequired
+        end
+    end
+    local seen, used = {}, 0
+    local getInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+    self.requiredItems = self.requiredItems or {}
+    self.itemLoads = self.itemLoads or {}
+    for _, objective in ipairs(objectives[3] or {}) do
+        local itemID = objective[1]
+        if type(itemID) == "number" and itemID > 0 and not seen[itemID] then
+            seen[itemID] = true
+            self.requiredItemIDs[itemID] = true
+            local info = getInfo and { getInfo(itemID) } or {}
+            if not info[1] and not self.itemLoads[itemID] and C_Item and C_Item.RequestLoadItemDataByID then
+                self.itemLoads[itemID] = true
+                C_Item.RequestLoadItemDataByID(itemID)
+            end
+            used = used + 1
+            local control = self.requiredItems[used]
+            if not control then
+                control = CreateFrame("Button", nil, self.frame.content)
+                control:SetSize(CONTENT_WIDTH, 30)
+                control.icon = control:CreateTexture(nil, "ARTWORK")
+                control.icon:SetSize(26, 26)
+                control.icon:SetPoint("LEFT")
+                control.name = control:CreateFontString(nil, "OVERLAY", "QuestFont")
+                control.name:SetPoint("LEFT", 32, 0)
+                control.name:SetPoint("RIGHT", -18, 0)
+                control.name:SetJustifyH("LEFT")
+                control.name:SetMaxLines(1)
+                control.name:SetTextColor(0.16, 0.1, 0.04)
+                control.count = control:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+                control.count:SetPoint("BOTTOMRIGHT", control.icon, "BOTTOMRIGHT", -1, 1)
+                control.buyable = CreateFrame("Frame", nil, control)
+                control.buyable:SetSize(16, 26)
+                control.buyable:SetPoint("RIGHT")
+                local dollar = control.buyable:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                dollar:SetAllPoints()
+                dollar:SetText("$")
+                dollar:SetTextColor(0.12, 0.4, 0.08)
+                control.buyable:SetScript("OnEnter", function(owner)
+                    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine("Tradable", 1, 1, 1)
+                    GameTooltip:Show()
+                end)
+                control.buyable:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                control.buyable:EnableMouse(true)
+                control:SetScript("OnEnter", function(owner)
+                    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+                    GameTooltip:SetItemByID(owner.itemID)
+                    GameTooltip:Show()
+                end)
+                control:SetScript("OnLeave", function(owner)
+                    if GameTooltip:IsOwned(owner) then GameTooltip:Hide() end
+                end)
+                self.requiredItems[used] = control
+            end
+            control.itemID = itemID
+            control:ClearAllPoints()
+            control:SetPoint("TOPLEFT", TEXT_INSET, -self.cursor)
+            control.icon:SetTexture(info[10] or 134400)
+            control.name:SetText(info[1] or Anquestry.db.library.Item.name(itemID) or ("Item " .. itemID))
+            control.count:SetText(counts[itemID] and tostring(counts[itemID]) or "")
+            local binding = info[14]
+            control.buyable:SetShown(info[1] ~= nil and (binding == 0 or binding == 2 or binding == 3))
+            control:Show()
+            self.cursor = self.cursor + 32
+        end
+    end
+end
+
 -- Draw native-style quest reward cards in two columns, with item tooltips.
 function details:AddItems(items)
     local startY = self.cursor
@@ -368,6 +446,7 @@ function details:Render()
     for _, label in ipairs(self.texts) do label:Hide() end
     for _, control in ipairs(self.endpointButtons) do control:Hide() end
     for _, card in ipairs(self.itemButtons) do card:Hide() end
+    for _, item in ipairs(self.requiredItems or {}) do item:Hide() end
     for _, header in pairs(self.sections) do header:Hide() end
     self.frame.rewardsBackground:Hide()
     self.frame.rewardsHeader:Hide()
@@ -380,6 +459,7 @@ function details:Render()
     self.renderParent = self.frame.titleFrame
     self.itemRows, self.twoRowHeight = 0, nil
     self.rewardItemIDs = {}
+    self.requiredItemIDs = {}
     local level = Anquestry.db:Get(id, "questLevel") or 0
     self:AddText(Anquestry.db:Get(id, "name") or ("Quest " .. id), "QuestTitleFont", 0.94, 0.83, 0.65)
     self.frame.levelLabel:SetText(("Lvl %d"):format(level))
@@ -421,6 +501,7 @@ function details:Render()
         if self:AddSection("objectives", "Objectives") then self:AddText(objectives) end
         self.cursor = self.cursor + 2
     end
+    self:AddRequiredItems(id)
     local hasDescription = type(description) == "string" and description:match("%S")
     if hasDescription then
         if self:AddSection("description", "Description") then self:AddText(description) end
@@ -814,6 +895,7 @@ function details:Initialize()
     self.texts, self.endpointButtons, self.itemButtons, self.sections = {}, {}, {}, {}
     frame:RegisterEvent("QUEST_DATA_LOAD_RESULT")
     frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    frame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
     frame:RegisterEvent("QUEST_LOG_UPDATE")
     frame:RegisterEvent("PLAYER_LEVEL_UP")
     frame:RegisterEvent("SKILL_LINES_CHANGED")
@@ -824,8 +906,10 @@ function details:Initialize()
                 request.basicState = success and "ready" or "failed"
             end
             if id == self.questID then self:ScheduleRefresh() end
-        elseif event == "GET_ITEM_INFO_RECEIVED" then
-            if success and self.rewardItemIDs and self.rewardItemIDs[id] then self:ScheduleRefresh() end
+        elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
+            if self.itemLoads then self.itemLoads[id] = nil end
+            if success and ((self.rewardItemIDs and self.rewardItemIDs[id])
+                or (self.requiredItemIDs and self.requiredItemIDs[id])) then self:ScheduleRefresh() end
         elseif frame:IsShown() then
             if next(self.statuses) then self.searchDirty = true end
             self:ScheduleRefresh()

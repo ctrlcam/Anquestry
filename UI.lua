@@ -205,6 +205,7 @@ end
 
 -- Reuse thin textures for rails, elbows, and quest dots.
 function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
+    chain = chain or {}
     self.linkArt = self.linkArt or {}
     local used, nodes = 0, {}
     local nodeRed, nodeGreen, nodeBlue
@@ -1113,7 +1114,7 @@ function Anquestry.ui:Refresh(selectedID, reason)
     self.lastSelected = selectedID
     local chain = Anquestry.resolver:Resolve(selectedID)
     if #chain == 0 then
-        self:DrawLinks({}, {}, 0, 0)
+        self:DrawLinks({}, {}, 0, 0, {}, {})
         self.frame.xpTotal:SetText("")
         for _, row in ipairs(self.rows) do row:Hide() end
         self.frame.footer:SetText("No QuestieDB data for this quest.")
