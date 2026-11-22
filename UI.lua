@@ -575,7 +575,7 @@ end
 -- Create the flyout and hook it into Blizzard’s quest windows.
 function Anquestry.ui:Initialize()
     if self.frame then return end
-    local f = CreateFrame("Frame", "AnquestryFlyout", UIParent, BackdropTemplateMixin and "BackdropTemplate")
+    local f = CreateFrame("Frame", not self.independent and "AnquestryFlyout" or nil, UIParent, BackdropTemplateMixin and "BackdropTemplate")
     f:SetSize(PANEL_WIDTH, 70)
     f:SetIgnoreParentScale(true)
     f:SetScale(UIParent:GetEffectiveScale())
@@ -677,6 +677,8 @@ function Anquestry.ui:Initialize()
         Anquestry:RebuildCache()
     end)
 
+    if self.independent then return end
+
     if QuestFrame then
         QuestFrame:HookScript("OnShow", function() Anquestry:Refresh("SHOW") end)
         QuestFrame:HookScript("OnHide", function() Anquestry.giverQuestID = nil; Anquestry:Refresh("SHOW") end)
@@ -766,7 +768,11 @@ function Anquestry.ui:SetCollapsed(collapsed)
     self.frame.xpTotal:SetShown(not collapsed)
     f:SetSize(collapsed and HEADER_HEIGHT or PANEL_WIDTH, collapsed and HEADER_HEIGHT or self.expandedHeight or 70)
     if GameTooltip:IsOwned(f.launcher) then GameTooltip:Hide() end
-    Anquestry:Refresh("COLLAPSE")
+    if self.independent then
+        if not collapsed then syncQuestLogArt(f) end
+    else
+        Anquestry:Refresh("COLLAPSE")
+    end
 end
 
 -- Fit the rows and footer while keeping long chains scrollable.
@@ -1121,7 +1127,6 @@ function Anquestry.ui:Refresh(selectedID, reason)
         self:FitHeight(6)
         return
     end
-    local summary = Anquestry.progress:Summary(chain)
     local inspected
     if self.inspectedQuestID then
         for _, info in ipairs(chain) do
@@ -1131,6 +1136,13 @@ function Anquestry.ui:Refresh(selectedID, reason)
     local inspectionLost = self.inspectedQuestID and not inspected
     if inspectionLost then self.inspectedQuestID = nil end
     local highlightedID = self.inspectedQuestID or selectedID
+    self:RenderFlyout(chain, highlightedID)
+end
+
+-- Render the same tree, totals, and fitted scrolling region in either flyout.
+function Anquestry.ui:RenderFlyout(chain, highlightedID)
+    syncQuestLogArt(self.frame)
+    local summary = Anquestry.progress:Summary(chain)
     local offset = self:RenderTree(chain, highlightedID)
     local range = summary.minLevel and (summary.minLevel .. "–" .. summary.maxLevel) or "?"
     self.frame.footer:SetText(("%d/%d done  ·  Lv %s"):format(summary.complete, summary.total, range))
@@ -1270,18 +1282,18 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
     return offset
 end
 
-function Anquestry.ui:CreateTree(parent, onSelect)
-    local view = setmetatable({ rows = {}, linkArt = {}, onSelect = onSelect }, { __index = self })
-    local scroll = CreateFrame("ScrollFrame", nil, parent)
-    scroll:SetAllPoints()
-    scroll:EnableMouseWheel(true)
-    scroll:SetScript("OnMouseWheel", function(owner, delta)
-        owner:SetVerticalScroll(math.max(0, math.min(owner:GetVerticalScroll() - delta * 44, owner:GetVerticalScrollRange())))
-    end)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(parent:GetWidth(), 1)
-    scroll:SetScrollChild(content)
-    view.frame = { content = content, scroll = scroll }
-    scroll:HookScript("OnSizeChanged", function(owner, width) content:SetWidth(width) end)
+-- Reuse the complete flyout chrome with independent selection, rows, and collapse state.
+function Anquestry.ui:CreateFlyout(parent, onSelect)
+    local view = setmetatable({ frame = false, rows = {}, linkArt = {}, collapsed = false,
+        independent = true, expandedHeight = 70, contentHeight = 0, onSelect = onSelect }, { __index = self })
+    view:Initialize()
+    local frame = view.frame
+    frame:SetParent(parent)
+    frame:SetIgnoreParentScale(false)
+    frame:SetScale(1)
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", parent, "TOPRIGHT", 8, 0)
+    view.anchor = parent
+    frame:Show()
     return view
 end

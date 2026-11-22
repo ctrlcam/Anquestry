@@ -6,8 +6,6 @@ Anquestry.details = details
 local WINDOW_WIDTH, WINDOW_HEIGHT = 620, 500
 local SIDEBAR_WIDTH, PAGE_SIZE, TEXT_INSET = 234, 15, 14
 local PANE_WIDTH = WINDOW_WIDTH - SIDEBAR_WIDTH - 20
-local TREE_WIDTH = 275
-WINDOW_WIDTH = WINDOW_WIDTH + TREE_WIDTH + 4
 local CONTENT_WIDTH = PANE_WIDTH - 40
 local INFO_HEIGHT = 26
 local LINK_HEIGHT = 28
@@ -426,14 +424,12 @@ end
 function details:UpdateTree()
     local view = self.treeView
     if not view then return end
-    Anquestry.ui.SyncQuestLogArt(self.frame.tree)
     local chain = Anquestry.resolver.chains and Anquestry.resolver:Resolve(self.questID) or {}
-    Anquestry.progress:Summary(chain)
     if self.treeQuestID ~= self.questID then
         view.frame.scroll:SetVerticalScroll(0)
         self.treeQuestID = self.questID
     end
-    view:RenderTree(chain, self.questID)
+    view:RenderFlyout(chain, self.questID)
     local scroll = view.frame.scroll
     scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
 end
@@ -760,20 +756,11 @@ function details:Initialize()
     frame.next:SetPoint("BOTTOMRIGHT", -9, 8)
     frame.pageText = sidebar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.pageText:SetPoint("BOTTOM", 0, 14)
-    local tree = CreateFrame("Frame", nil, frame)
-    frame.tree = tree
-    tree:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 4, 0)
-    tree:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMRIGHT", 4, 0)
-    tree:SetWidth(TREE_WIDTH)
-    local treeBackground = tree:CreateTexture(nil, "BACKGROUND")
-    treeBackground:SetAllPoints()
-    treeBackground:SetColorTexture(0.09, 0.075, 0.06, 1)
-    tree.questLogArt = tree:CreateTexture(nil, "BACKGROUND", nil, 1)
-    tree.questLogArt:SetAllPoints()
-    self.treeView = Anquestry.ui:CreateTree(tree, function(id) self:Open(id) end)
+    self.treeView = Anquestry.ui:CreateFlyout(frame, function(id) self:Open(id) end)
+    frame.tree = self.treeView.frame
     local pane = CreateFrame("Frame", nil, frame)
     frame.pane = pane
-    pane:SetPoint("TOPLEFT", tree, "TOPRIGHT", 4, 0)
+    pane:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 4, 0)
     pane:SetPoint("BOTTOMRIGHT", -8, 8)
     local divider = frame:CreateTexture(nil, "BORDER")
     divider:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 0, 0)
@@ -785,16 +772,6 @@ function details:Initialize()
     dividerEdge:SetPoint("BOTTOMLEFT", divider, "BOTTOMLEFT", 1, 0)
     dividerEdge:SetWidth(1)
     dividerEdge:SetColorTexture(0.65, 0.45, 0.25, 0.8)
-    local treeDivider = frame:CreateTexture(nil, "BORDER")
-    treeDivider:SetPoint("TOPLEFT", tree, "TOPRIGHT", 0, 0)
-    treeDivider:SetPoint("BOTTOMLEFT", tree, "BOTTOMRIGHT", 0, 0)
-    treeDivider:SetWidth(4)
-    treeDivider:SetColorTexture(0.22, 0.15, 0.09, 1)
-    local treeEdge = frame:CreateTexture(nil, "ARTWORK")
-    treeEdge:SetPoint("TOPLEFT", treeDivider, "TOPLEFT", 1, 0)
-    treeEdge:SetPoint("BOTTOMLEFT", treeDivider, "BOTTOMLEFT", 1, 0)
-    treeEdge:SetWidth(1)
-    treeEdge:SetColorTexture(0.65, 0.45, 0.25, 0.8)
     local toolbarDivider = frame:CreateTexture(nil, "BORDER")
     toolbarDivider:SetPoint("TOPLEFT", 8, -90)
     toolbarDivider:SetPoint("TOPRIGHT", -8, -90)
