@@ -74,10 +74,44 @@ local function resolveIDs(selectedID, before, after, levels, breadcrumbs, exclus
         depths[id] = depth
         ordered[#ordered + 1] = id
     end
+    -- Visit short sibling paths first so a lone follow-up is not stranded below a long branch.
+    local branchSizes = {}
+    local function branchSize(id)
+        if branchSizes[id] then return branchSizes[id] end
+        local seen, queue = { [id] = true }, { id }
+        local head = 1
+        while queue[head] do
+            local current = queue[head]
+            head = head + 1
+            local function add(child)
+                if child and included[child] and not seen[child] then
+                    seen[child] = true
+                    queue[#queue + 1] = child
+                end
+            end
+            for _, child in ipairs(after[current] or {}) do add(child) end
+            add(breadcrumbs[current])
+        end
+        branchSizes[id] = #queue
+        return #queue
+    end
+    local function byBranchSize(a, b)
+        local sizeA, sizeB = branchSize(a), branchSize(b)
+        if sizeA ~= sizeB then return sizeA < sizeB end
+        return byLevel(a, b)
+    end
     -- Keep each follow-up path together and indent where paths fork.
     local walked, branches = {}, {}
     local function walk(id, depth, branch)
         if walked[id] then return end
+        -- Defer joins rather than pulling an unvisited sibling's parents into this path.
+        -- That sibling must visit its own short follow-ups before the merged path continues.
+        for _, parent in ipairs(before[id] or {}) do
+            if included[parent] and not visited[parent] then return end
+        end
+        for _, parent in ipairs(optionalBefore[id] or {}) do
+            if not visited[parent] then return end
+        end
         walked[id] = true
         branches[id] = branch
         place(id, depth)
@@ -90,7 +124,7 @@ local function resolveIDs(selectedID, before, after, levels, breadcrumbs, exclus
         end
         local leadTo = breadcrumbs[id]
         if leadTo and included[leadTo] and not seen[leadTo] then children[#children + 1] = leadTo end
-        table.sort(children, byLevel)
+        table.sort(children, byBranchSize)
         local childDepth = #children > 1 and math.min(depth + 1, 2) or depth
         for _, child in ipairs(children) do
             walk(child, childDepth, #children > 1 and child or branch)
@@ -129,7 +163,7 @@ function Anquestry.resolver:LoadCache()
     self.factionMask = factionMasks and factionMasks[faction]
     local otherFaction = faction == "Alliance" and "Horde" or faction == "Horde" and "Alliance"
     self.otherFactionMask = otherFaction and factionMasks and factionMasks[otherFaction]
-    self.buildKey = (version or commit) and ("8|" .. (version or "") .. "|" .. (commit or ""))
+    self.buildKey = (version or commit) and ("10|" .. (version or "") .. "|" .. (commit or ""))
     self.key = self.buildKey and (self.buildKey .. "|" .. (class or "") .. "|" .. (faction or ""))
     local store = AnquestryChainCache
     local saved = type(store) == "table" and (store[self.key] or store)

@@ -826,19 +826,11 @@ local function createIconTag(row, texture)
     return tag
 end
 
--- Toggle the endpoint's waypoint, replacing a different user waypoint when necessary.
+-- Briefly highlight an NPC location without creating or changing a user waypoint.
 function Anquestry.ui:ShowEndpointOnMap(point)
     if InCombatLockdown() then
         Anquestry:Print("Open quest locations after combat.")
         return false
-    end
-    local waypoint = C_Map and C_Map.GetUserWaypoint and C_Map.GetUserWaypoint()
-    if waypoint and waypoint.uiMapID == point.map and waypoint.position and C_Map.ClearUserWaypoint then
-        local x, y = waypoint.position.x, waypoint.position.y
-        if x and y and math.abs(x - point.x) < 0.00001 and math.abs(y - point.y) < 0.00001 then
-            C_Map.ClearUserWaypoint()
-            return true
-        end
     end
     if C_Map and C_Map.OpenWorldMap then
         C_Map.OpenWorldMap(point.map)
@@ -848,13 +840,62 @@ function Anquestry.ui:ShowEndpointOnMap(point)
     else
         return false
     end
-    if C_Map and C_Map.SetUserWaypoint and C_Map.CanSetUserWaypointOnMap
-        and UiMapPoint and C_Map.CanSetUserWaypointOnMap(point.map) then
-        C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(point.map, point.x, point.y))
-        return true
+    local map = WorldMapFrame
+    local canvas = map and map.GetCanvas and map:GetCanvas()
+    if not canvas then return false end
+    if map:GetMapID() ~= point.map and map.SetMapID then map:SetMapID(point.map) end
+    local flash = self.locationFlash
+    if not flash then
+        flash = CreateFrame("Frame", nil, canvas)
+        flash:EnableMouse(false)
+        flash.glow = flash:CreateTexture(nil, "OVERLAY")
+        flash.glow:SetAllPoints()
+        flash.glow:SetTexture("Interface\\Cooldown\\star4")
+        flash.glow:SetBlendMode("ADD")
+        flash.glow:SetVertexColor(1, 0.8, 0.2)
+        map:HookScript("OnHide", function()
+            flash:Hide()
+            flash:SetScript("OnUpdate", nil)
+        end)
+        self.locationFlash = flash
     end
-    Anquestry:Print("This map doesn’t support a pin.")
-    return false
+    flash:SetParent(canvas)
+    flash:SetFrameStrata(map:GetFrameStrata())
+    local level = canvas:GetFrameLevel()
+    for _, child in ipairs({ canvas:GetChildren() }) do
+        if child ~= flash then level = math.max(level, child:GetFrameLevel()) end
+    end
+    flash:SetFrameLevel(level + 1)
+    flash.elapsed = 0
+    flash.waited = 0
+    flash.started = false
+    local function update(owner, elapsed)
+        if not owner.started then
+            owner.waited = owner.waited + elapsed
+            if map:GetMapID() ~= point.map or canvas:GetWidth() <= 0 or canvas:GetHeight() <= 0 then
+                if owner.waited > 0.5 then owner:Hide(); owner:SetScript("OnUpdate", nil) end
+                return
+            end
+            owner.started = true
+        else
+            owner.elapsed = owner.elapsed + elapsed
+        end
+        if owner.elapsed >= 1 or map:GetMapID() ~= point.map then
+            owner:Hide()
+            owner:SetScript("OnUpdate", nil)
+            return
+        end
+        owner:ClearAllPoints()
+        owner:SetPoint("CENTER", canvas, "TOPLEFT", point.x * canvas:GetWidth(), -point.y * canvas:GetHeight())
+        local scale = map.ScrollContainer and map.ScrollContainer:GetCanvasScale() or 1
+        local size = (36 + 36 * owner.elapsed) / math.max(scale, 0.01)
+        owner:SetSize(size, size)
+        owner:SetAlpha(1 - owner.elapsed)
+    end
+    flash:Show()
+    update(flash, 0)
+    flash:SetScript("OnUpdate", update)
+    return true
 end
 
 -- Create an unfocused, copyable URL field shared by both quest information views.
@@ -1111,7 +1152,6 @@ function Anquestry.ui:Refresh(selectedID, reason)
         self:FitHeight(35)
         return
     end
-    if self.collapsed then return end
     local selectionChanged = selectedID ~= self.lastSelected
     if selectionChanged then
         self.inspectedQuestID = nil
@@ -1120,13 +1160,10 @@ function Anquestry.ui:Refresh(selectedID, reason)
     self.lastSelected = selectedID
     local chain = Anquestry.resolver:Resolve(selectedID)
     if #chain == 0 then
-        self:DrawLinks({}, {}, 0, 0, {}, {})
-        self.frame.xpTotal:SetText("")
-        for _, row in ipairs(self.rows) do row:Hide() end
-        self.frame.footer:SetText("No QuestieDB data for this quest.")
-        self:FitHeight(6)
+        self.frame:Hide()
         return
     end
+    if self.collapsed then return end
     local inspected
     if self.inspectedQuestID then
         for _, info in ipairs(chain) do
@@ -1141,6 +1178,11 @@ end
 
 -- Render the same tree, totals, and fitted scrolling region in either flyout.
 function Anquestry.ui:RenderFlyout(chain, highlightedID)
+    if not chain or #chain == 0 then
+        self.frame:Hide()
+        return
+    end
+    self.frame:Show()
     syncQuestLogArt(self.frame)
     local summary = Anquestry.progress:Summary(chain)
     local offset = self:RenderTree(chain, highlightedID)
