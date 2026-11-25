@@ -65,6 +65,63 @@ local function layoutLinks(chain)
         positions[info.id] = i
         for _, id in ipairs(info.variants or {}) do positions[id] = i end
     end
+    local relations, incoming, outgoing = {}, {}, {}
+    local function linkRows(from, to)
+        local first, last = positions[from], positions[to]
+        if not first or not last or first == last then return end
+        outgoing[first] = outgoing[first] or {}
+        incoming[last] = incoming[last] or {}
+        outgoing[first][last], incoming[last][first] = true, true
+    end
+    for _, info in ipairs(chain) do
+        for _, id in ipairs(info.variants or { info.id }) do
+            local before, after = Anquestry.db:Relationships(id)
+            relations[id] = { before, after }
+            for _, parent in ipairs(before) do linkRows(parent, id) end
+            for _, child in ipairs(after) do linkRows(id, child) end
+        end
+    end
+    local function sortedIDs(ids, isSet)
+        local seen, sorted = {}, {}
+        for key, value in pairs(ids or {}) do
+            local id = isSet and key or value
+            if not seen[id] then sorted[#sorted + 1] = id; seen[id] = true end
+        end
+        table.sort(sorted)
+        return table.concat(sorted, ",")
+    end
+    local families, blocks = {}, {}
+    for index, info in ipairs(chain) do
+        local exclusive = Anquestry.db:Get(info.id, "exclusiveTo") or {}
+        local breadcrumb = Anquestry.db:Get(info.id, "breadcrumbForQuestId")
+        if #exclusive > 0 and (not breadcrumb or breadcrumb <= 0) then
+            local family = { info.id }
+            for _, id in ipairs(exclusive) do family[#family + 1] = id end
+            local relation = relations[info.id]
+            local key = info.title .. "|" .. tostring(info.level) .. "|" .. sortedIDs(family)
+                .. "|" .. sortedIDs(relation[1]) .. "|" .. sortedIDs(relation[2])
+                .. "|" .. sortedIDs(incoming[index], true) .. "|" .. sortedIDs(outgoing[index], true)
+                .. "|" .. sortedIDs(Anquestry.db:Get(info.id, "preQuestGroup"))
+            families[key] = families[key] or {}
+            table.insert(families[key], index)
+        end
+    end
+    -- Only adjacent, mutually exclusive rows with identical routes share a visual node.
+    -- Their quest IDs, row positions, selection and item data remain independent.
+    for _, family in pairs(families) do
+        local first, last = family[1], family[#family]
+        if #family > 1 and last - first + 1 == #family then
+            blocks[first] = { last = last }
+            for _, index in ipairs(family) do
+                local info = chain[index]
+                positions[info.id] = first
+                for _, id in ipairs(info.variants or {}) do positions[id] = first end
+            end
+        end
+    end
+    local function nextNode(index)
+        return (blocks[index] and blocks[index].last or index) + 1
+    end
     -- Group outgoing links so siblings share a single vertical rail.
     local function add(from, to, breadcrumb)
         local first, last = positions[from], positions[to]
@@ -80,7 +137,7 @@ local function layoutLinks(chain)
     end
     for _, info in ipairs(chain) do
         for _, variant in ipairs(info.variants or { info.id }) do
-            local earlier, later = Anquestry.db:Relationships(variant)
+            local earlier, later = unpack(relations[variant])
             for _, id in ipairs(earlier) do add(id, variant, false) end
             for _, id in ipairs(later) do add(variant, id, false) end
         end
@@ -126,7 +183,7 @@ local function layoutLinks(chain)
                     while step < target and not endings[step] do
                         local rail = groups[step * 2 - 1]
                         local nextStep = rail and next(rail.targets)
-                        if not nextStep or nextStep ~= step + 1 or next(rail.targets, nextStep) then break end
+                        if not nextStep or nextStep ~= nextNode(step) or next(rail.targets, nextStep) then break end
                         step = nextStep
                     end
                     local ending = groups[step * 2 - 1]
@@ -181,7 +238,9 @@ local function layoutLinks(chain)
                     seenSources[source] = true
                 end
             end
-            if visible == #required and #sources > 1 then
+            if visible == #required and #sources == 1 and #required > 1 then
+                joins[target] = label
+            elseif visible == #required and #sources > 1 then
                 table.sort(sources)
                 local fork = joinTargets[joinKey(required, label)] == 1 and findSharedFork(sources, target)
                 local taps = {}
@@ -238,7 +297,7 @@ local function layoutLinks(chain)
     end)
     for _, group in ipairs(rails) do
         local target, breadcrumb = next(group.targets)
-        if not group.taps and target == group.first + 1 and not next(group.targets, target)
+        if not group.taps and target == nextNode(group.first) and not next(group.targets, target)
             and (breadcrumb or (outCount[group.first] == 1 and inCount[target] == 1)) then
             group.straight = target
         else
@@ -249,7 +308,7 @@ local function layoutLinks(chain)
         end
     end
     local gutter = #rails > 0 and math.min(34, 12 + #laneEnds * 5) or 0
-    return rails, offsets, gutter, #laneEnds, joins, offset, links
+    return rails, offsets, gutter, #laneEnds, joins, offset, links, blocks
 end
 
 -- Reuse thin textures for rails, elbows, and quest dots.
@@ -450,7 +509,7 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
             end
             arrow(target, true)
             nodes[group.first] = nodes[group.first] or "circle"
-            nodes[target] = group.targets[target] and (nodes[target] or "circle") or "square"
+            nodes[target] = "circle"
         else
             local x = railX(group)
             local solidEnd = y
@@ -494,8 +553,6 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
             for step = 0, 3 do
                 segment(x - step, y - 3 + step * 2, step * 2 + 1, step == 3 and 1 or 2, true)
             end
-        elseif shape == "square" then
-            segment(x - 2, y - 2, 5, 5, true)
         else
             segment(x - 1, y - 2, 3, 5, true)
             segment(x - 2, y - 1, 5, 3, true)
