@@ -29,14 +29,15 @@ local function collect(seeds, edges, ids, included, maxNodes, skip)
 end
 
 -- Sort the selected quest and its upstream and downstream paths.
-local function resolveIDs(selectedID, before, after, levels, breadcrumbs, exclusive, maxNodes)
+local function resolveIDs(selectedID, before, after, levels, breadcrumbs, exclusive, maxNodes, objectiveKeys)
     local ids, included = { selectedID }, { [selectedID] = true }
     local beforeCapped = collect({ selectedID }, before, ids, included, maxNodes)
     local afterCapped = collect({ selectedID }, after, ids, included, maxNodes)
     local blocked = {}
     for _, id in ipairs(ids) do
         for _, alternative in ipairs(exclusive[id] or {}) do
-            if not included[alternative] then blocked[alternative] = true end
+            if not included[alternative] and objectiveKeys and objectiveKeys[id]
+                and objectiveKeys[id] == objectiveKeys[alternative] then blocked[alternative] = true end
         end
     end
     -- Bring in missing prerequisites without importing alternate routes already represented.
@@ -163,7 +164,7 @@ function Anquestry.resolver:LoadCache()
     self.factionMask = factionMasks and factionMasks[faction]
     local otherFaction = faction == "Alliance" and "Horde" or faction == "Horde" and "Alliance"
     self.otherFactionMask = otherFaction and factionMasks and factionMasks[otherFaction]
-    self.buildKey = (version or commit) and ("10|" .. (version or "") .. "|" .. (commit or ""))
+    self.buildKey = (version or commit) and ("11|" .. (version or "") .. "|" .. (commit or ""))
     self.key = self.buildKey and (self.buildKey .. "|" .. (class or "") .. "|" .. (faction or ""))
     local store = AnquestryChainCache
     local saved = type(store) == "table" and (store[self.key] or store)
@@ -178,6 +179,7 @@ function Anquestry.resolver:Build(onProgress, onDone)
     self.building = true
     local ids = Anquestry.db.quest.GetAllIds()
     local before, after, levels, chains, breadcrumbs, exclusive = {}, {}, {}, {}, {}, {}
+    local objectiveKeys = {}
     local known = Anquestry.db.quest.GetAllIds(true)
     local eligible = {}
     local band = bit and bit.band
@@ -217,12 +219,16 @@ function Anquestry.resolver:Build(onProgress, onDone)
                 levels[id] = Anquestry.db:Get(id, "questLevel") or 0
                 breadcrumbs[id] = Anquestry.db:Get(id, "breadcrumbForQuestId")
                 exclusive[id] = Anquestry.db:Get(id, "exclusiveTo")
+                local objectives = Anquestry.db:Get(id, "objectivesText")
+                if objectives and #objectives > 0 then
+                    objectiveKeys[id] = (Anquestry.db:Get(id, "name") or "") .. "|" .. table.concat(objectives, "\n")
+                end
                 for _, target in ipairs(prerequisites) do link(target, id) end
                 for _, target in ipairs(followups) do link(id, target) end
             else
                 local id = ids[processed - #ids]
                 if matchesCharacter(id) then
-                    chains[id] = resolveIDs(id, before, after, levels, breadcrumbs, exclusive, self.maxNodes)
+                    chains[id] = resolveIDs(id, before, after, levels, breadcrumbs, exclusive, self.maxNodes, objectiveKeys)
                 end
             end
             if deadline and debugprofilestop() >= deadline then break end
@@ -246,8 +252,9 @@ function Anquestry.resolver:Build(onProgress, onDone)
 end
 
 -- Look up a saved chain and fill in its titles and levels.
-function Anquestry.resolver:Resolve(selectedID)
-    local chain = self.chains and self.chains[selectedID]
+function Anquestry.resolver:Resolve(selectedID, contextID)
+    local rootID = contextID or selectedID
+    local chain = self.chains and self.chains[rootID]
     if not chain then return {} end
     local rows = {}
     local skills = Anquestry.db:PlayerSkills()
@@ -291,7 +298,11 @@ function Anquestry.resolver:Resolve(selectedID)
         scores[id] = score
         return score
     end
-    local included, queue = { [selectedID] = true }, { selectedID }
+    local included, queue = { [rootID] = true }, { rootID }
+    if selectedID ~= rootID and available[selectedID] then
+        included[selectedID] = true
+        queue[#queue + 1] = selectedID
+    end
     -- Keep all downstream branches and location variants.
     local index = 1
     while queue[index] do
@@ -314,8 +325,12 @@ function Anquestry.resolver:Resolve(selectedID)
                     if before[id][other] and not required[other]
                         and Anquestry.db:Get(other, "name") == Anquestry.db:Get(previous, "name")
                         and Anquestry.db:Get(other, "questLevel") == Anquestry.db:Get(previous, "questLevel") then
+                        local text = Anquestry.db:Get(previous, "objectivesText") or {}
+                        local otherText = Anquestry.db:Get(other, "objectivesText") or {}
+                        local equivalent = #text > 0 and #text == #otherText
+                            and table.concat(text, "\n") == table.concat(otherText, "\n")
                         local otherScore = routeScore(other)
-                        if included[other] or otherScore > score or (otherScore == score and other < previous) then
+                        if equivalent and (included[other] or otherScore > score or (otherScore == score and other < previous)) then
                             keep = false
                             break
                         end

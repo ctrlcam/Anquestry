@@ -130,6 +130,24 @@ local function layoutLinks(chain)
             end
         end
     end
+    local joinTargets = {}
+    local function joinKey(required, label)
+        local ids = {}
+        for _, id in ipairs(required) do ids[#ids + 1] = id end
+        table.sort(ids)
+        return label .. "|" .. table.concat(ids, ",")
+    end
+    for _, info in ipairs(chain) do
+        local all = Anquestry.db:Get(info.id, "preQuestGroup") or {}
+        local any = Anquestry.db:Get(info.id, "preQuestSingle") or {}
+        local required, label
+        if #all > 1 and #any == 0 then required, label = all, "ALL"
+        elseif #any > 1 and #all == 0 then required, label = any, "ANY" end
+        if required then
+            local key = joinKey(required, label)
+            joinTargets[key] = (joinTargets[key] or 0) + 1
+        end
+    end
     for target, info in ipairs(chain) do
         local all = Anquestry.db:Get(info.id, "preQuestGroup")
         local any = Anquestry.db:Get(info.id, "preQuestSingle")
@@ -152,7 +170,7 @@ local function layoutLinks(chain)
             end
             if visible == #required and #sources > 1 then
                 table.sort(sources)
-                local fork = findSharedFork(sources, target)
+                local fork = joinTargets[joinKey(required, label)] == 1 and findSharedFork(sources, target)
                 local taps = {}
                 for index, source in ipairs(sources) do
                     groups[source * 2 - 1].targets[target] = nil
@@ -165,6 +183,24 @@ local function layoutLinks(chain)
                     groups[#chain * 2 + target] = { first = sources[1], targets = { [target] = false }, taps = taps }
                 end
                 joins[target] = label
+            end
+        end
+    end
+    -- Alternative destinations with identical ANY/ALL inputs share one joining rail.
+    -- Keeping one rail per destination falsely makes a flat choice look deeply nested.
+    local sharedRails = {}
+    for key, group in pairs(groups) do
+        if group.taps then
+            local sources = {}
+            for source in pairs(group.taps) do sources[#sources + 1] = source end
+            table.sort(sources)
+            local signature = group.first .. "|" .. table.concat(sources, ",")
+            local shared = sharedRails[signature]
+            if shared then
+                for target, breadcrumb in pairs(group.targets) do shared.targets[target] = breadcrumb end
+                groups[key] = nil
+            else
+                sharedRails[signature] = group
             end
         end
     end
@@ -194,7 +230,7 @@ local function layoutLinks(chain)
             group.straight = target
         else
             local lane = 1
-            while laneEnds[lane] and laneEnds[lane] >= group.first - 1 do lane = lane + 1 end
+            while laneEnds[lane] and laneEnds[lane] >= group.first do lane = lane + 1 end
             laneEnds[lane] = group.last
             group.lane = lane
         end
@@ -206,6 +242,21 @@ end
 -- Reuse thin textures for rails, elbows, and quest dots.
 function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
     chain = chain or {}
+    local siblings = {}
+    for index, info in ipairs(chain) do
+        local exclusive = Anquestry.db:Get(info.id, "exclusiveTo") or {}
+        if #exclusive > 0 then
+            local family = { info.id }
+            for _, id in ipairs(exclusive) do family[#family + 1] = id end
+            table.sort(family)
+            local parents = Anquestry.db:Relationships(info.id)
+            table.sort(parents)
+            local key = table.concat(family, ",") .. "|" .. table.concat(parents, ",")
+                .. "|" .. info.title .. "|" .. tostring(info.level)
+            siblings[key] = siblings[key] or {}
+            table.insert(siblings[key], index)
+        end
+    end
     self.linkArt = self.linkArt or {}
     local used, nodes = 0, {}
     local nodeRed, nodeGreen, nodeBlue
@@ -313,6 +364,14 @@ function Anquestry.ui:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
                         changed = true
                     end
                 end
+            end
+        end
+        -- Mutually exclusive quests with the same parents are peers, regardless of rail count.
+        for _, family in pairs(siblings) do
+            local x = 0
+            for _, index in ipairs(family) do x = math.max(x, nodePositions[index] or nodeX) end
+            for _, index in ipairs(family) do
+                if nodePositions[index] ~= x then nodePositions[index] = x; changed = true end
             end
         end
         if not changed then break end
@@ -661,6 +720,22 @@ function Anquestry.ui:Initialize()
     f.content = CreateFrame("Frame", nil, f.scroll)
     f.content:SetWidth(PANEL_WIDTH - 10); f.content:SetHeight(1)
     f.scroll:SetScrollChild(f.content)
+    f.scrollbar = CreateFrame("Slider", nil, f)
+    f.scrollbar:SetFrameLevel(f.content:GetFrameLevel() + 10)
+    f.scrollbar:SetPoint("TOPRIGHT", f.scroll, "TOPRIGHT", 2, -2)
+    f.scrollbar:SetPoint("BOTTOMRIGHT", f.scroll, "BOTTOMRIGHT", 2, 2)
+    f.scrollbar:SetWidth(4)
+    f.scrollbar:SetOrientation("VERTICAL")
+    f.scrollbar:SetValueStep(1)
+    f.scrollbar:SetThumbTexture("Interface\\Buttons\\WHITE8X8")
+    f.scrollbar:GetThumbTexture():SetVertexColor(0.76, 0.55, 0.34, 0.85)
+    f.scrollbar:SetScript("OnValueChanged", function(_, value)
+        if not self.updatingScrollbar then f.scroll:SetVerticalScroll(value) end
+    end)
+    f.scrollbar:Hide()
+    f.scroll:HookScript("OnVerticalScroll", function() self:UpdateTreeScroll() end)
+    f.scroll:HookScript("OnScrollRangeChanged", function() self:UpdateTreeScroll() end)
+    f.scroll:HookScript("OnSizeChanged", function() self:UpdateTreeScroll() end)
     f.footer = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     f.footer:SetPoint("BOTTOMLEFT", 12, 9); f.footer:SetPoint("BOTTOMRIGHT", -100, 9)
     f.footer:SetJustifyH("LEFT")
@@ -767,6 +842,8 @@ function Anquestry.ui:SetCollapsed(collapsed)
     self.frame.footerBand:SetShown(not collapsed)
     self.frame.xpTotal:SetShown(not collapsed)
     f:SetSize(collapsed and HEADER_HEIGHT or PANEL_WIDTH, collapsed and HEADER_HEIGHT or self.expandedHeight or 70)
+    self:UpdateTreeScroll()
+    if not collapsed and self.lastHighlightedID then self:RevealTreeSelection(self.lastHighlightedID) end
     if GameTooltip:IsOwned(f.launcher) then GameTooltip:Hide() end
     if self.independent then
         if not collapsed then syncQuestLogArt(f) end
@@ -801,6 +878,41 @@ function Anquestry.ui:FitHeight(contentHeight)
     end
     self.expandedHeight = math.min(maxHeight, HEADER_HEIGHT + contentHeight + footerHeight + infoHeight)
     if not self.collapsed then self.frame:SetHeight(self.expandedHeight) end
+end
+
+-- Overlay a narrow scrollbar without reserving a column inside the tree.
+function Anquestry.ui:UpdateTreeScroll()
+    local f = self.frame
+    if not f or not f.scrollbar or self.updatingScrollbar then return end
+    local height = f.scroll:GetHeight()
+    local contentHeight = f.content:GetHeight()
+    local range = math.max(0, contentHeight - height)
+    self.updatingScrollbar = true
+    f.scrollbar:SetMinMaxValues(0, range)
+    f.scrollbar:GetThumbTexture():SetSize(4, math.max(18, height * height / math.max(1, contentHeight)))
+    f.scrollbar:SetValue(math.min(f.scroll:GetVerticalScroll(), range))
+    f.scrollbar:SetShown(range > 0.5 and not self.collapsed)
+    self.updatingScrollbar = false
+end
+
+-- Reveal only a newly selected row so ordinary refreshes do not undo manual scrolling.
+function Anquestry.ui:RevealTreeSelection(id)
+    if self.collapsed then return end
+    local scroll = self.frame.scroll
+    local height, current = scroll:GetHeight(), scroll:GetVerticalScroll()
+    if height <= 0 then return end
+    for _, row in ipairs(self.rows) do
+        if row.questID == id and row.treeOffset then
+            local top, bottom = row.treeOffset, row.treeOffset + row:GetHeight()
+            local nextOffset = current
+            if top < current then nextOffset = top
+            elseif bottom > current + height then nextOffset = bottom - height end
+            local range = math.max(0, self.frame.content:GetHeight() - height)
+            scroll:SetVerticalScroll(math.max(0, math.min(nextOffset, range)))
+            break
+        end
+    end
+    self:UpdateTreeScroll()
 end
 
 -- Create a hoverable icon with its own tooltip.
@@ -1055,6 +1167,7 @@ function Anquestry.ui:GetRow(index)
         for _, questRow in ipairs(self.rows) do
             questRow.highlight:SetShown(questRow == button)
         end
+        self:RevealTreeSelection(questID)
         local index = C_QuestLog and C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(questID)
         if index and index > 0 then
             Anquestry.mapPreviewQuestID = nil
@@ -1158,10 +1271,10 @@ function Anquestry.ui:Refresh(selectedID, reason)
     local selectionChanged = selectedID ~= self.lastSelected
     if selectionChanged then
         self.inspectedQuestID = nil
-        self.frame.scroll:SetVerticalScroll(0)
     end
     self.lastSelected = selectedID
-    local chain = Anquestry.resolver:Resolve(selectedID)
+    local chain, contextChanged = self:ResolveTree(selectedID)
+    if contextChanged then self.frame.scroll:SetVerticalScroll(0) end
     if #chain == 0 then
         self.frame:Hide()
         return
@@ -1177,6 +1290,21 @@ function Anquestry.ui:Refresh(selectedID, reason)
     if inspectionLost then self.inspectedQuestID = nil end
     local highlightedID = self.inspectedQuestID or selectedID
     self:RenderFlyout(chain, highlightedID)
+end
+
+-- Keep the displayed graph stable while inspecting its existing rows or location variants.
+function Anquestry.ui:ResolveTree(selectedID)
+    local resolver = Anquestry.resolver
+    local changed = self.treeCache ~= resolver.chains or not self.treeIDs or not self.treeIDs[selectedID]
+    if changed then self.treeRootID = selectedID; self.visibleSelection = 0 end
+    self.treeCache = resolver.chains
+    local chain = resolver:Resolve(selectedID, self.treeRootID)
+    self.treeIDs = {}
+    for _, info in ipairs(chain) do
+        self.treeIDs[info.id] = true
+        for _, id in ipairs(info.variants or {}) do self.treeIDs[id] = true end
+    end
+    return chain, changed
 end
 
 -- Render the same tree, totals, and fitted scrolling region in either flyout.
@@ -1198,6 +1326,12 @@ function Anquestry.ui:RenderFlyout(chain, highlightedID)
     self:FitHeight(offset + 4)
     local scroll = self.frame.scroll
     scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
+    self:UpdateTreeScroll()
+    self.lastHighlightedID = highlightedID
+    if self.visibleSelection ~= highlightedID then
+        self:RevealTreeSelection(highlightedID)
+        self.visibleSelection = highlightedID
+    end
 end
 
 -- Share tree rows and connector rendering between the flyout and the detail browser.
@@ -1206,6 +1340,7 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
     local nodePositions = self:DrawLinks(groups, offsets, gutter, lanes, joins, chain)
     for i, info in ipairs(chain) do
         local row = self:GetRow(i); row.questID = info.id
+        row.treeOffset = offsets[i]
         row.info = info
         row:ClearAllPoints(); row:SetPoint("TOPLEFT", self.frame.content, "TOPLEFT", 3 + gutter, -offsets[i])
         row:SetPoint("RIGHT", self.frame.content, "RIGHT")
@@ -1330,7 +1465,8 @@ end
 -- Reuse the complete flyout chrome with independent selection, rows, and collapse state.
 function Anquestry.ui:CreateFlyout(parent, onSelect)
     local view = setmetatable({ frame = false, rows = {}, linkArt = {}, collapsed = false,
-        independent = true, expandedHeight = 70, contentHeight = 0, onSelect = onSelect }, { __index = self })
+        independent = true, expandedHeight = 70, contentHeight = 0, onSelect = onSelect,
+        treeIDs = {}, treeCache = false, visibleSelection = 0 }, { __index = self })
     view:Initialize()
     local frame = view.frame
     frame:SetParent(parent)

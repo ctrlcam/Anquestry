@@ -324,7 +324,7 @@ function details:AddRequiredItems(id)
                 control.buyable:SetScript("OnLeave", function() GameTooltip:Hide() end)
                 control.buyable:EnableMouse(true)
                 control:SetScript("OnEnter", function(owner)
-                    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+                    GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT")
                     GameTooltip:SetItemByID(owner.itemID)
                     GameTooltip:Show()
                 end)
@@ -379,7 +379,7 @@ function details:AddItems(items)
             card.count = card:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
             card.count:SetPoint("BOTTOMRIGHT", card.icon, "BOTTOMRIGHT", -1, 1)
             card:SetScript("OnEnter", function(owner)
-                GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+                GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT")
                 GameTooltip:SetItemByID(owner.itemID)
                 GameTooltip:Show()
             end)
@@ -426,10 +426,9 @@ end
 function details:UpdateTree()
     local view = self.treeView
     if not view then return end
-    local chain = Anquestry.resolver.chains and Anquestry.resolver:Resolve(self.questID) or {}
-    if self.treeQuestID ~= self.questID then
+    local chain, contextChanged = view:ResolveTree(self.questID)
+    if contextChanged then
         view.frame.scroll:SetVerticalScroll(0)
-        self.treeQuestID = self.questID
     end
     view:RenderFlyout(chain, self.questID)
     local scroll = view.frame.scroll
