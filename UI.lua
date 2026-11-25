@@ -5,6 +5,19 @@ Anquestry.ui = { rows = {}, collapsed = false }
 
 local PANEL_WIDTH, STANDALONE_MAX_HEIGHT = 275, 390
 local HEADER_HEIGHT = 34
+local TAG_OPTIONS = {
+    { "dungeon", "Dungeon" }, { "elite", "Elite" }, { "objective", "Objective types" },
+    { "distance", "Long distance" }, { "locations", "Multiple locations" },
+}
+
+function Anquestry.ui:TagEnabled(key)
+    if type(AnquestrySettings.tagVisibility) ~= "table" then
+        local enabled = AnquestrySettings.showObjectiveIcons ~= false
+        AnquestrySettings.tagVisibility = {}
+        for _, option in ipairs(TAG_OPTIONS) do AnquestrySettings.tagVisibility[option[1]] = enabled end
+    end
+    return AnquestrySettings.tagVisibility[key] ~= false
+end
 local COMPLETED_COLOR = 0.53
 local XP_GRADE_COLORS = {
     ["S+"] = "ffd700", S = "f5ca32", A = "e6bd55", B = "d8b371",
@@ -600,14 +613,14 @@ local function createHeaderIconButton(parent, iconTexture)
             button.backgroundArt[#button.backgroundArt + 1] = region
         end
     end
-    if iconTexture == "tags" then
+    if iconTexture == "tags" or iconTexture == "xp" then
         local icon = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        icon:SetFont(STANDARD_TEXT_FONT, 15, "")
+        icon:SetFont(STANDARD_TEXT_FONT, iconTexture == "xp" and 10 or 15, "")
         icon:SetAllPoints(button)
         icon:SetJustifyH("CENTER")
         icon:SetJustifyV("MIDDLE")
         icon:SetShadowOffset(0, 0)
-        icon:SetText("#")
+        icon:SetText(iconTexture == "xp" and "XP" or "#")
         button.icon = icon
     elseif iconTexture then
         local icon = button:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -695,6 +708,8 @@ function Anquestry.ui:Initialize()
             if Anquestry.details then Anquestry.details:ScheduleRefresh() end
         end)
         updateIcon(AnquestrySettings[key] ~= false)
+        control.SetActive = updateIcon
+        control.UpdateState = function() updateIcon(AnquestrySettings[key] ~= false) end
         control:SetScript("OnEnter", function(button)
             GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
             GameTooltip:SetText(label)
@@ -703,8 +718,30 @@ function Anquestry.ui:Initialize()
         control:SetScript("OnLeave", function() GameTooltip:Hide() end)
         return control
     end
-    f.endpointToggle = quickToggle("showEndpointIcons", "Interface\\GossipFrame\\AvailableQuestIcon", "Start/end NPCs")
-    f.objectiveToggle = quickToggle("showObjectiveIcons", "tags", "Tags", f.endpointToggle)
+    f.endpointToggle = quickToggle("showEndpointIcons", "Interface\\GossipFrame\\AvailableQuestIcon", "NPCs")
+    f.xpToggle = quickToggle("showXP", "xp", "XP", f.endpointToggle)
+    f.objectiveToggle = quickToggle("showObjectiveIcons", "tags", "Tags", f.xpToggle)
+    f.objectiveToggle.UpdateState = function()
+        local enabled = false
+        for _, option in ipairs(TAG_OPTIONS) do enabled = self:TagEnabled(option[1]) or enabled end
+        f.objectiveToggle.SetActive(enabled)
+    end
+    f.objectiveToggle:SetScript("OnClick", function(owner)
+        GameTooltip:Hide()
+        MenuUtil.CreateContextMenu(owner, function(_, root)
+            for _, option in ipairs(TAG_OPTIONS) do
+                local key, label = option[1], option[2]
+                root:CreateCheckbox(label, function() return self:TagEnabled(key) end, function()
+                    AnquestrySettings.tagVisibility[key] = not self:TagEnabled(key)
+                    f.objectiveToggle.UpdateState()
+                    Anquestry:Refresh("SETTINGS")
+                    if Anquestry.details then Anquestry.details:ScheduleRefresh() end
+                    return MenuResponse.Refresh
+                end)
+            end
+        end)
+    end)
+    f.objectiveToggle.UpdateState()
     f.title:SetPoint("RIGHT", f.objectiveToggle, "LEFT", -4, 0)
     f.scroll = CreateFrame("ScrollFrame", nil, f)
     f.scroll:SetPoint("TOPLEFT", 5, -HEADER_HEIGHT); f.scroll:SetPoint("BOTTOMRIGHT", -5, 26)
@@ -724,11 +761,11 @@ function Anquestry.ui:Initialize()
     f.scrollbar:SetFrameLevel(f.content:GetFrameLevel() + 10)
     f.scrollbar:SetPoint("TOPRIGHT", f.scroll, "TOPRIGHT", 2, -2)
     f.scrollbar:SetPoint("BOTTOMRIGHT", f.scroll, "BOTTOMRIGHT", 2, 2)
-    f.scrollbar:SetWidth(4)
+    f.scrollbar:SetWidth(3)
     f.scrollbar:SetOrientation("VERTICAL")
     f.scrollbar:SetValueStep(1)
     f.scrollbar:SetThumbTexture("Interface\\Buttons\\WHITE8X8")
-    f.scrollbar:GetThumbTexture():SetVertexColor(0.76, 0.55, 0.34, 0.85)
+    f.scrollbar:GetThumbTexture():SetVertexColor(0.28, 0.28, 0.28, 0.85)
     f.scrollbar:SetScript("OnValueChanged", function(_, value)
         if not self.updatingScrollbar then f.scroll:SetVerticalScroll(value) end
     end)
@@ -834,13 +871,15 @@ function Anquestry.ui:SetCollapsed(collapsed)
     f.titleButton:SetShown(not collapsed)
     f.endpointToggle:SetShown(not collapsed)
     f.objectiveToggle:SetShown(not collapsed)
+    f.xpToggle:SetShown(not collapsed)
     f.headerBand:SetShown(not collapsed)
     f.headerButton:SetShown(not collapsed)
     if collapsed then f.questLogArt:Hide() end
     self.frame.scroll:SetShown(not collapsed)
     self.frame.footer:SetShown(not collapsed)
     self.frame.footerBand:SetShown(not collapsed)
-    self.frame.xpTotal:SetShown(not collapsed)
+    self.frame.xpTotal:SetShown(not collapsed and AnquestrySettings.showXP ~= false)
+    f.build:SetShown(not collapsed and not Anquestry.resolver.chains)
     f:SetSize(collapsed and HEADER_HEIGHT or PANEL_WIDTH, collapsed and HEADER_HEIGHT or self.expandedHeight or 70)
     self:UpdateTreeScroll()
     if not collapsed and self.lastHighlightedID then self:RevealTreeSelection(self.lastHighlightedID) end
@@ -889,7 +928,7 @@ function Anquestry.ui:UpdateTreeScroll()
     local range = math.max(0, contentHeight - height)
     self.updatingScrollbar = true
     f.scrollbar:SetMinMaxValues(0, range)
-    f.scrollbar:GetThumbTexture():SetSize(4, math.max(18, height * height / math.max(1, contentHeight)))
+    f.scrollbar:GetThumbTexture():SetSize(3, math.max(18, height * height / math.max(1, contentHeight)))
     f.scrollbar:SetValue(math.min(f.scroll:GetVerticalScroll(), range))
     f.scrollbar:SetShown(range > 0.5 and not self.collapsed)
     self.updatingScrollbar = false
@@ -1092,6 +1131,14 @@ function Anquestry.ui:GetRow(index)
     row.strike:Hide()
     row.xp = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.xp:SetPoint("RIGHT", -3, 0)
+    row.npcBreak = row:CreateTexture(nil, "OVERLAY")
+    row.npcBreak:SetSize(1, 10)
+    row.npcBreak:SetPoint("CENTER", row, "RIGHT", -15.5, 0)
+    row.npcBreak:SetColorTexture(0.7, 0.55, 0.32, 0.55)
+    row.handoffBreak = row:CreateTexture(nil, "OVERLAY")
+    row.handoffBreak:SetSize(28, 1)
+    row.handoffBreak:SetPoint("TOPRIGHT", row, "TOPRIGHT", -1, 1)
+    row.handoffBreak:SetColorTexture(0.7, 0.55, 0.32, 0.55)
     row.startNPC = createIconTag(row, "Interface\\GossipFrame\\AvailableQuestIcon")
     row.endNPC = createIconTag(row, "Interface\\GossipFrame\\ActiveQuestIcon")
     for _, tag in ipairs({ row.startNPC, row.endNPC }) do
@@ -1139,6 +1186,12 @@ function Anquestry.ui:GetRow(index)
     row.dungeon = createIconTag(row, nil)
     row.dungeon.icon:SetAtlas("Dungeon")
     row.dungeon.tooltip = "Dungeon"
+    row.elite = createIconTag(row, nil)
+    row.elite.icon:Hide()
+    local elite = row.elite:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    elite:SetAllPoints()
+    elite:SetText("+")
+    row.elite.tooltip = "Elite"
     row:SetScript("OnEnter", function(button)
         local hasObjective = false
         for _, objective in ipairs(Anquestry.db:Get(button.questID, "objectivesText") or {}) do
@@ -1257,17 +1310,7 @@ function Anquestry.ui:Refresh(selectedID, reason)
         self:FitHeight(6)
         return
     end
-    local ready = Anquestry.resolver.chains ~= nil
-    self.frame.build:SetShown(not ready and not self.collapsed)
-    if not ready then
-        self.frame.xpTotal:SetText("")
-        if not Anquestry.resolver.building and type(AnquestryChainCache) == "table" then
-            self.frame.build:SetText("Rebuild quest chain cache")
-        end
-        self.frame.footer:SetText("Build cache to view quest chains.")
-        self:FitHeight(35)
-        return
-    end
+    if self:RenderCacheState() then return end
     local selectionChanged = selectedID ~= self.lastSelected
     if selectionChanged then
         self.inspectedQuestID = nil
@@ -1292,6 +1335,27 @@ function Anquestry.ui:Refresh(selectedID, reason)
     self:RenderFlyout(chain, highlightedID)
 end
 
+-- Both flyouts show the same actionable cache prompt before graph data is ready.
+function Anquestry.ui:RenderCacheState()
+    local f = self.frame
+    if Anquestry.resolver.chains then f.build:Hide(); return false end
+    f:Show()
+    syncQuestLogArt(f)
+    for _, row in ipairs(self.rows) do row:Hide() end
+    for _, art in ipairs(self.linkArt or {}) do art:Hide() end
+    f.content:SetHeight(1)
+    f.xpTotal:SetText("")
+    f.footer:SetText("Build cache to view quest chains.")
+    local busy = Anquestry.resolver.building
+    f.build:SetEnabled(not busy)
+    f.build:SetText(busy and ("Building cache… %d%%"):format(Anquestry.cachePercent or 0)
+        or type(AnquestryChainCache) == "table" and "Rebuild quest chain cache" or "Build quest chain cache")
+    f.build:SetShown(not self.collapsed)
+    self:FitHeight(35)
+    self:UpdateTreeScroll()
+    return true
+end
+
 -- Keep the displayed graph stable while inspecting its existing rows or location variants.
 function Anquestry.ui:ResolveTree(selectedID)
     local resolver = Anquestry.resolver
@@ -1309,11 +1373,15 @@ end
 
 -- Render the same tree, totals, and fitted scrolling region in either flyout.
 function Anquestry.ui:RenderFlyout(chain, highlightedID)
+    if self:RenderCacheState() then return end
     if not chain or #chain == 0 then
         self.frame:Hide()
         return
     end
     self.frame:Show()
+    for _, toggle in ipairs({ self.frame.xpToggle, self.frame.objectiveToggle, self.frame.endpointToggle }) do
+        toggle.UpdateState()
+    end
     syncQuestLogArt(self.frame)
     local summary = Anquestry.progress:Summary(chain)
     local offset = self:RenderTree(chain, highlightedID)
@@ -1322,7 +1390,9 @@ function Anquestry.ui:RenderFlyout(chain, highlightedID)
     local xp = tostring(summary.remainingXP)
     if summary.unknownXP then xp = summary.remainingXP > 0 and (xp .. "+") or "—" end
     local totalColor = XP_GRADE_COLORS[summary.xpGrade] or XP_GRADE_COLORS["F-"]
-    self.frame.xpTotal:SetText("|cff" .. totalColor .. xp .. " XP|r")
+    local showXP = AnquestrySettings.showXP ~= false
+    self.frame.xpTotal:SetText(showXP and ("|cff" .. totalColor .. xp .. " XP|r") or "")
+    self.frame.xpTotal:SetShown(showXP and not self.collapsed)
     self:FitHeight(offset + 4)
     local scroll = self.frame.scroll
     scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
@@ -1332,6 +1402,23 @@ function Anquestry.ui:RenderFlyout(chain, highlightedID)
         self:RevealTreeSelection(highlightedID)
         self.visibleSelection = highlightedID
     end
+end
+
+-- Unknown or overlapping NPC sets do not imply a handoff.
+function Anquestry.ui:NPCChanges(id, previousID)
+    local function npcs(questID, field)
+        local endpoints = questID and Anquestry.db:Get(questID, field) or {}
+        return endpoints and endpoints[1] or {}
+    end
+    local function different(a, b)
+        if #a == 0 or #b == 0 then return false end
+        for _, first in ipairs(a) do
+            for _, second in ipairs(b) do if first == second then return false end end
+        end
+        return true
+    end
+    local start = npcs(id, "startedBy")
+    return different(start, npcs(id, "finishedBy")), different(npcs(previousID, "finishedBy"), start)
 end
 
 -- Share tree rows and connector rendering between the flyout and the detail browser.
@@ -1385,8 +1472,7 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
         local xpText = info.xp and (tostring(info.xp) .. " XP") or "—"
         local color = done and "878787" or info.xp and XP_GRADE_COLORS[info.xpGrade]
         row.xp:SetText(color and ("|cff" .. color .. xpText .. "|r") or xpText)
-        local showTags = AnquestrySettings.showObjectiveIcons ~= false
-        local kinds = showTags and Anquestry.db:ObjectiveTypes(info.id) or {}
+        local kinds = self:TagEnabled("objective") and Anquestry.db:ObjectiveTypes(info.id) or {}
         local kind = kinds[1]
         row.objective:SetShown(kind ~= nil)
         if kind then
@@ -1394,10 +1480,12 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
             row.objective.tooltip = kind.label
         end
         local npcInset = AnquestrySettings.showEndpointIcons ~= false and 28 or 0
+        local showXP = AnquestrySettings.showXP ~= false
+        row.xp:SetShown(showXP)
         row.xp:ClearAllPoints()
         row.xp:SetPoint("RIGHT", -3 - npcInset, 0)
-        local tagInset = 4 + npcInset + row.xp:GetStringWidth()
-        local dungeon = showTags and Anquestry.db:IsDungeonQuest(info.id)
+        local tagInset = 4 + npcInset + (showXP and row.xp:GetStringWidth() or 0)
+        local dungeon = self:TagEnabled("dungeon") and Anquestry.db:IsDungeonQuest(info.id)
         row.dungeon:SetShown(dungeon)
         if dungeon then
             row.dungeon:ClearAllPoints()
@@ -1409,8 +1497,15 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
             row.objective:SetPoint("RIGHT", -tagInset, 0)
             tagInset = tagInset + row.objective:GetWidth() + 1
         end
+        local elite = self:TagEnabled("elite") and Anquestry.db:IsEliteQuest(info.id)
+        row.elite:SetShown(elite)
+        if elite then
+            row.elite:ClearAllPoints()
+            row.elite:SetPoint("RIGHT", -tagInset, 0)
+            tagInset = tagInset + row.elite:GetWidth() + 1
+        end
         local threshold = Anquestry:GetTravelThreshold()
-        local travel = showTags and threshold > 0 and Anquestry.db:TravelDistance(info.id)
+        local travel = self:TagEnabled("distance") and threshold > 0 and Anquestry.db:TravelDistance(info.id)
         local distant = travel and (travel.differentContinents or travel.yards > threshold)
         row.travel:SetShown(not not distant)
         if distant then
@@ -1420,8 +1515,9 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
             row.travel:SetPoint("RIGHT", -tagInset, 0)
             tagInset = tagInset + row.travel:GetWidth() + 1
         end
-        row.locationTag:SetShown(showTags and info.locations ~= nil)
-        if showTags and info.locations then
+        local locations = self:TagEnabled("locations") and info.locations ~= nil
+        row.locationTag:SetShown(locations)
+        if locations then
             row.locationTag.tooltip = (info.alternatives and "%d alternative starters" or "%d locations"):format(info.locations)
             row.locationTag:ClearAllPoints()
             row.locationTag:SetPoint("RIGHT", -tagInset, 0)
@@ -1444,6 +1540,19 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
                 tag:SetPoint("RIGHT", starts and -16 or -2, 0)
             end
         end
+        local within, between = false, false
+        if npcInset > 0 then
+            local previousID
+            for _, connection in ipairs(connections or {}) do
+                if connection.index == i - 1 and connection.label ~= "Breadcrumb for" then
+                    previousID = chain[i - 1].id
+                    break
+                end
+            end
+            within, between = self:NPCChanges(info.id, previousID)
+        end
+        row.npcBreak:SetShown(within)
+        row.handoffBreak:SetShown(between)
         row.text:SetPoint("RIGHT", -tagInset - 3, 0)
         local level = info.level and info.level > 0 and ("[" .. info.level .. "] ") or ""
         local r, g, b = self:QuestColor(info.level, info.id)

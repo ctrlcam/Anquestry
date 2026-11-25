@@ -27,10 +27,13 @@ function Anquestry:UpdateCacheStatus()
         self.config.cacheStatus:SetText("Quest chain cache: " .. status)
         self.config.rebuild:SetEnabled(not busy and not self.disabledReason)
     end
-    local build = self.ui.frame and self.ui.frame.build
-    if build then
-        build:SetEnabled(not busy)
-        build:SetText(busy and progress or self.resolver.chains and "Rebuild quest chain cache" or "Build quest chain cache")
+    local detailTree = self.details and self.details.treeView
+    for _, view in ipairs({ self.ui, detailTree }) do
+        local build = view.frame and view.frame.build
+        if build then
+            build:SetEnabled(not busy)
+            build:SetText(busy and progress or self.resolver.chains and "Rebuild quest chain cache" or "Build quest chain cache")
+        end
     end
 end
 
@@ -46,6 +49,7 @@ function Anquestry:RebuildCache()
     end, function()
         self:UpdateCacheStatus()
         self:Refresh("CACHE_READY")
+        if self.details then self.details:ScheduleRefresh() end
     end)
     self:UpdateCacheStatus()
 end

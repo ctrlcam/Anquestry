@@ -426,6 +426,7 @@ end
 function details:UpdateTree()
     local view = self.treeView
     if not view then return end
+    if view:RenderCacheState() then return end
     local chain, contextChanged = view:ResolveTree(self.questID)
     if contextChanged then
         view.frame.scroll:SetVerticalScroll(0)

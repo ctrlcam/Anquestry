@@ -169,8 +169,16 @@ function Anquestry.db:ObjectiveTexture(kind)
     return Questie and Questie.usedIcons and Questie.usedIcons[kind.icon] or kind.texture
 end
 
--- Read the same native dungeon tags used by Questie.
-function Anquestry.db:IsDungeonQuest(id)
+-- Prefer Questie's corrected tags when installed, otherwise use the native client tag.
+function Anquestry.db:QuestTag(id)
+    if self.questieTagDB == nil and QuestieLoader and QuestieLoader.ImportModule then
+        local ok, module = pcall(QuestieLoader.ImportModule, QuestieLoader, "QuestieDB")
+        self.questieTagDB = ok and module or false
+    end
+    if self.questieTagDB and self.questieTagDB.GetQuestTagInfo then
+        local ok, tag = pcall(self.questieTagDB.GetQuestTagInfo, id)
+        if ok and tag then return tag end
+    end
     local tag
     if C_QuestLog and C_QuestLog.GetQuestTagInfo then
         local info = C_QuestLog.GetQuestTagInfo(id)
@@ -178,8 +186,18 @@ function Anquestry.db:IsDungeonQuest(id)
     elseif GetQuestTagInfo then
         tag = GetQuestTagInfo(id)
     end
+    return tag
+end
+
+function Anquestry.db:IsDungeonQuest(id)
+    local tag = self:QuestTag(id)
     local tags = Enum and Enum.QuestTag
     return tag == (tags and tags.Dungeon or 81) or tag == (tags and tags.Heroic or 85)
+end
+
+function Anquestry.db:IsEliteQuest(id)
+    local tags = Enum and Enum.QuestTag
+    return self:QuestTag(id) == (tags and tags.Elite or 1)
 end
 
 -- Read the quest's NPC, object, and item endpoints.
