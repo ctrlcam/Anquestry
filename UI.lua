@@ -778,11 +778,14 @@ end
 -- Fit the rows and footer while keeping long chains scrollable.
 function Anquestry.ui:FitHeight(contentHeight)
     self.contentHeight = contentHeight
+    local xpWidth = self.frame.xpTotal:GetStringWidth()
+    local rightInset = xpWidth > 0 and xpWidth + 16 or 12
+    self.frame.footer:SetPoint("BOTTOMRIGHT", -rightInset, 9)
     local footerHeight = math.max(26, self.frame.footer:GetStringHeight() + 15)
     local infoHeight = 0
     self.frame.scroll:SetPoint("BOTTOMRIGHT", -5, footerHeight + infoHeight)
     self.frame.footer:SetPoint("BOTTOMLEFT", 12, 9 + infoHeight)
-    self.frame.footer:SetPoint("BOTTOMRIGHT", -100, 9 + infoHeight)
+    self.frame.footer:SetPoint("BOTTOMRIGHT", -rightInset, 9 + infoHeight)
     self.frame.xpTotal:SetPoint("BOTTOMRIGHT", -8, 9 + infoHeight)
     self.frame.footerBand:SetPoint("BOTTOMRIGHT", -3, 5 + infoHeight)
     local host = self.anchor
@@ -850,7 +853,7 @@ function Anquestry.ui:ShowEndpointOnMap(point)
         flash:EnableMouse(false)
         flash.glow = flash:CreateTexture(nil, "OVERLAY")
         flash.glow:SetAllPoints()
-        flash.glow:SetTexture("Interface\\Cooldown\\star4")
+        flash.glow:SetTexture("Interface\\AddOns\\" .. addonName .. "\\icons\\map-flash.tga")
         flash.glow:SetBlendMode("ADD")
         flash.glow:SetVertexColor(1, 0.8, 0.2)
         map:HookScript("OnHide", function()
