@@ -89,7 +89,7 @@ local function handleSlashCommand(message)
         if not id or not Anquestry.db:Exists(id) then
             id = details.catalog[1] and details.catalog[1].id
         end
-        if id then details:Open(id) end
+        if id then details:Open(id, false, "search") end
         return
     end
     if command:lower() == "settings" or command:lower() == "opt" then

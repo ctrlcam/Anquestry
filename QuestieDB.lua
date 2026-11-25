@@ -200,6 +200,46 @@ function Anquestry.db:IsEliteQuest(id)
     return self:QuestTag(id) == (tags and tags.Elite or 1)
 end
 
+-- Resolve dungeon names from the quest zone, or from its objective locations.
+function Anquestry.db:DungeonNames(id)
+    if not self.dungeonAreas then
+        self.dungeonAreas = {}
+        local support = self.library.Support
+        local zone = support and support.Get("ZoneDB")
+        for area, dungeon in pairs(zone and zone.private and zone.private.dungeons or {}) do
+            local name = C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(area) or dungeon[1]
+            self.dungeonAreas[area] = name
+            for _, alternate in ipairs(dungeon[2] or {}) do self.dungeonAreas[alternate] = name end
+        end
+    end
+    local zoneName = self.dungeonAreas[self:Get(id, "zoneOrSort")]
+    if zoneName then return { zoneName } end
+    local found = {}
+    local function addSpawns(entity, entryID)
+        local spawns = entity and entity.spawns and entity.spawns(entryID)
+        for area in pairs(spawns or {}) do
+            local name = self.dungeonAreas[tonumber(area)]
+            if name then found[name] = true end
+        end
+    end
+    local objectives = self:Get(id, "objectives") or {}
+    for _, objective in ipairs(objectives[1] or {}) do addSpawns(self.library.Npc, objective[1]) end
+    for _, objective in ipairs(objectives[2] or {}) do addSpawns(self.library.Object, objective[1]) end
+    for _, objective in ipairs(objectives[3] or {}) do
+        local item = self.library.Item
+        for _, npc in ipairs(item and item.npcDrops and item.npcDrops(objective[1]) or {}) do
+            addSpawns(self.library.Npc, npc)
+        end
+        for _, object in ipairs(item and item.objectDrops and item.objectDrops(objective[1]) or {}) do
+            addSpawns(self.library.Object, object)
+        end
+    end
+    local names = {}
+    for name in pairs(found) do names[#names + 1] = name end
+    table.sort(names)
+    return names
+end
+
 -- Read the quest's NPC, object, and item endpoints.
 function Anquestry.db:QuestEndpoints(id)
     local endpoints = {}

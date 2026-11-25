@@ -602,44 +602,21 @@ local function createHeaderBand(frame, onClick)
     return band, button
 end
 
--- Use one standard red button skin with a single, separate foreground symbol.
-local function createHeaderIconButton(parent, iconTexture)
+-- Use the shared red button skin with a separate visibility icon.
+local function createDisplayButton(parent)
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     button:SetSize(24, 22)
-    button.backgroundArt = {}
     for _, region in ipairs({ button:GetRegions() }) do
-        if region:IsObjectType("Texture") then
-            region:SetVertexColor(1, 0.78, 0.5)
-            button.backgroundArt[#button.backgroundArt + 1] = region
-        end
+        if region:IsObjectType("Texture") then region:SetVertexColor(1, 0.78, 0.5) end
     end
-    if iconTexture == "tags" or iconTexture == "xp" then
-        local icon = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        icon:SetFont(STANDARD_TEXT_FONT, iconTexture == "xp" and 10 or 15, "")
-        icon:SetAllPoints(button)
-        icon:SetJustifyH("CENTER")
-        icon:SetJustifyV("MIDDLE")
-        icon:SetShadowOffset(0, 0)
-        icon:SetText(iconTexture == "xp" and "XP" or "#")
-        button.icon = icon
-    elseif iconTexture then
-        local icon = button:CreateTexture(nil, "OVERLAY", nil, 7)
-        icon:SetSize(13, 13)
-        icon:SetPoint("CENTER")
-        icon:SetTexture(iconTexture)
-        button.icon = icon
+    local icon = button:CreateTexture(nil, "OVERLAY", nil, 7)
+    icon:SetSize(19, 19)
+    icon:SetPoint("CENTER", 0, -1)
+    if C_Texture and C_Texture.GetAtlasInfo("GM-icon-visible") then
+        icon:SetAtlas("GM-icon-visible")
     else
-        local icon = button:CreateTexture(nil, "OVERLAY", nil, 7)
-        icon:SetSize(13, 13)
-        icon:SetPoint("CENTER")
-        if C_Texture and C_Texture.GetAtlasInfo("common-icon-redx") then
-            icon:SetAtlas("common-icon-redx")
-        else
-            icon:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
-        end
-        icon:SetDesaturated(true)
-        icon:SetVertexColor(1, 0.82, 0)
-        button.icon = icon
+        icon:SetTexture("Interface\\Icons\\Spell_Shadow_DetectInvisibility")
+        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     end
     return button
 end
@@ -681,68 +658,41 @@ function Anquestry.ui:Initialize()
     f.launcher:SetScript("OnLeave", function(button)
         if GameTooltip:IsOwned(button) then GameTooltip:Hide() end
     end)
-    local function quickToggle(key, texture, label, right)
-        local control = createHeaderIconButton(f, texture)
-        if right then control:SetPoint("RIGHT", right, "LEFT", -2, 0)
-        else control:SetPoint("TOPRIGHT", -8, -3) end
-        local icon = control.icon
-        local function updateIcon(enabled)
-            local shade = enabled and 1 or 0.8
-            for _, art in ipairs(control.backgroundArt) do
-                art:SetDesaturated(not enabled)
-                if enabled then art:SetVertexColor(1, 0.78, 0.5)
-                else art:SetVertexColor(shade, shade, shade) end
-            end
-            if icon:IsObjectType("Texture") then
-                icon:SetDesaturated(not enabled)
-                icon:SetVertexColor(shade, shade, shade)
-            else
-                if enabled then icon:SetTextColor(1, 0.82, 0)
-                else icon:SetTextColor(0.65, 0.65, 0.65) end
-            end
-        end
-        control:SetScript("OnClick", function()
-            AnquestrySettings[key] = AnquestrySettings[key] == false
-            updateIcon(AnquestrySettings[key])
-            Anquestry:Refresh("SETTINGS")
-            if Anquestry.details then Anquestry.details:ScheduleRefresh() end
-        end)
-        updateIcon(AnquestrySettings[key] ~= false)
-        control.SetActive = updateIcon
-        control.UpdateState = function() updateIcon(AnquestrySettings[key] ~= false) end
-        control:SetScript("OnEnter", function(button)
-            GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
-            GameTooltip:SetText(label)
-            GameTooltip:Show()
-        end)
-        control:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        return control
-    end
-    f.endpointToggle = quickToggle("showEndpointIcons", "Interface\\GossipFrame\\AvailableQuestIcon", "NPCs")
-    f.xpToggle = quickToggle("showXP", "xp", "XP", f.endpointToggle)
-    f.objectiveToggle = quickToggle("showObjectiveIcons", "tags", "Tags", f.xpToggle)
-    f.objectiveToggle.UpdateState = function()
-        local enabled = false
-        for _, option in ipairs(TAG_OPTIONS) do enabled = self:TagEnabled(option[1]) or enabled end
-        f.objectiveToggle.SetActive(enabled)
-    end
-    f.objectiveToggle:SetScript("OnClick", function(owner)
+    f.displayButton = createDisplayButton(f)
+    f.displayButton:SetPoint("TOPRIGHT", -8, -3)
+    f.displayButton:SetScript("OnEnter", function(owner)
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Display")
+        GameTooltip:Show()
+    end)
+    f.displayButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.displayButton:SetScript("OnClick", function(owner)
         GameTooltip:Hide()
         MenuUtil.CreateContextMenu(owner, function(_, root)
+            local function refresh()
+                Anquestry:Refresh("SETTINGS")
+                if Anquestry.details then Anquestry.details:ScheduleRefresh() end
+                return MenuResponse.Refresh
+            end
+            for _, option in ipairs({ { "showXP", "XP" }, { "showEndpointIcons", "NPCs" } }) do
+                local key, label = option[1], option[2]
+                root:CreateCheckbox(label, function() return AnquestrySettings[key] ~= false end, function()
+                    AnquestrySettings[key] = AnquestrySettings[key] == false
+                    return refresh()
+                end)
+            end
+            root:CreateDivider()
             for _, option in ipairs(TAG_OPTIONS) do
                 local key, label = option[1], option[2]
                 root:CreateCheckbox(label, function() return self:TagEnabled(key) end, function()
-                    AnquestrySettings.tagVisibility[key] = not self:TagEnabled(key)
-                    f.objectiveToggle.UpdateState()
-                    Anquestry:Refresh("SETTINGS")
-                    if Anquestry.details then Anquestry.details:ScheduleRefresh() end
-                    return MenuResponse.Refresh
+                    local enabled = self:TagEnabled(key)
+                    AnquestrySettings.tagVisibility[key] = not enabled
+                    return refresh()
                 end)
             end
         end)
     end)
-    f.objectiveToggle.UpdateState()
-    f.title:SetPoint("RIGHT", f.objectiveToggle, "LEFT", -4, 0)
+    f.title:SetPoint("RIGHT", f.displayButton, "LEFT", -4, 0)
     f.scroll = CreateFrame("ScrollFrame", nil, f)
     f.scroll:SetPoint("TOPLEFT", 5, -HEADER_HEIGHT); f.scroll:SetPoint("BOTTOMRIGHT", -5, 26)
     f.footerBand = f:CreateTexture(nil, "BACKGROUND", nil, 2)
@@ -869,9 +819,7 @@ function Anquestry.ui:SetCollapsed(collapsed)
     local f = self.frame
     f.title:SetShown(not collapsed)
     f.titleButton:SetShown(not collapsed)
-    f.endpointToggle:SetShown(not collapsed)
-    f.objectiveToggle:SetShown(not collapsed)
-    f.xpToggle:SetShown(not collapsed)
+    f.displayButton:SetShown(not collapsed)
     f.headerBand:SetShown(not collapsed)
     f.headerButton:SetShown(not collapsed)
     if collapsed then f.questLogArt:Hide() end
@@ -965,6 +913,10 @@ local function createIconTag(row, texture)
     tag.icon:SetTexture(texture)
     tag:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if self.dungeonQuestID then
+            local names = Anquestry.db:DungeonNames(self.dungeonQuestID)
+            self.tooltipLines = #names > 0 and names or nil
+        end
         if self.tooltipLines then
             for _, line in ipairs(self.tooltipLines) do
                 GameTooltip:AddLine(line, 1, 1, 1, false)
@@ -1151,7 +1103,7 @@ function Anquestry.ui:GetRow(index)
         end)
     end
     row:SetScript("OnDoubleClick", function(button)
-        Anquestry.details:Open(button.questID, false, true)
+        Anquestry.details:Open(button.questID, false, "url")
     end)
     row.objective = createIconTag(row, nil)
     row.locationTag = createIconTag(row, 134149)
@@ -1379,9 +1331,6 @@ function Anquestry.ui:RenderFlyout(chain, highlightedID)
         return
     end
     self.frame:Show()
-    for _, toggle in ipairs({ self.frame.xpToggle, self.frame.objectiveToggle, self.frame.endpointToggle }) do
-        toggle.UpdateState()
-    end
     syncQuestLogArt(self.frame)
     local summary = Anquestry.progress:Summary(chain)
     local offset = self:RenderTree(chain, highlightedID)
@@ -1486,6 +1435,7 @@ function Anquestry.ui:RenderTree(chain, highlightedID)
         row.xp:SetPoint("RIGHT", -3 - npcInset, 0)
         local tagInset = 4 + npcInset + (showXP and row.xp:GetStringWidth() or 0)
         local dungeon = self:TagEnabled("dungeon") and Anquestry.db:IsDungeonQuest(info.id)
+        row.dungeon.dungeonQuestID = info.id
         row.dungeon:SetShown(dungeon)
         if dungeon then
             row.dungeon:ClearAllPoints()

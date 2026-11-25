@@ -749,7 +749,7 @@ function details:Initialize()
         row.strike:SetHeight(1)
         row.strike:SetColorTexture(0.53, 0.53, 0.53, 1)
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
-        row:SetScript("OnClick", function(clicked) self:Open(clicked.questID) end)
+        row:SetScript("OnClick", function(clicked) self:Open(clicked.questID, false, "url") end)
         frame.rows[index] = row
     end
     frame.previous = button(sidebar, "‹", 32, function() self.page = self.page - 1; self:UpdateList() end)
@@ -758,7 +758,7 @@ function details:Initialize()
     frame.next:SetPoint("BOTTOMRIGHT", -9, 8)
     frame.pageText = sidebar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.pageText:SetPoint("BOTTOM", 0, 14)
-    self.treeView = Anquestry.ui:CreateFlyout(frame, function(id) self:Open(id) end)
+    self.treeView = Anquestry.ui:CreateFlyout(frame, function(id) self:Open(id, false, "url") end)
     frame.tree = self.treeView.frame
     local pane = CreateFrame("Frame", nil, frame)
     frame.pane = pane
@@ -907,7 +907,7 @@ function details:Initialize()
 end
 
 -- Open a quest's independent preview and request its client data on demand.
-function details:Open(id, keepFocus, focusURL)
+function details:Open(id, keepFocus, focusTarget)
     if not Anquestry.db:Exists(id) then return end
     self:Initialize()
     self:BuildCatalog()
@@ -934,8 +934,12 @@ function details:Open(id, keepFocus, focusURL)
     end
     self:RequestData(id)
     self:Render()
-    if focusURL then
+    if focusTarget == "url" then
+        self.frame.search:ClearFocus()
         self.frame.url:SetFocus()
         self.frame.url:HighlightText()
+    elseif focusTarget == "search" then
+        self.frame.url:ClearFocus()
+        self.frame.search:SetFocus()
     end
 end
